@@ -242,6 +242,147 @@ def test_a_percentage_tax_row_keeps_its_label(tmp_path):
     assert "gst" in names, f"a percentage in the label lost the row: {state.line_items}"
 
 
+# --- What the public automation sandboxes taught it -----------------------
+#
+# Every test below comes from one run against saucedemo, automationexercise,
+# the OpenCart demos and the Saleor storefront -- the first pages this tool
+# had ever seen that nobody prepared for it. Three of the four problems it
+# exposed were invisible to 252 passing tests.
+
+@pytest.mark.parametrize("text,expected", [
+    ("$19.99", 19.99), ("US$ 1,299", 1299.0), ("€40", 40.0), ("£12.50", 12.5),
+    ("¥1,200", 1200.0), ("19.99 USD", 19.99), ("500 INR", 500.0),
+])
+def test_money_outside_india_is_read_too(text, expected):
+    """The currency list was rupees only. Pointed at storefronts priced in
+    dollars, the extractor read NO price at all -- demo.opencart.com and
+    demo.saleor.io both came back "no price could be read", and DP-08, the
+    strongest claim this project makes, cannot run without one. A tool that
+    silently declines to measure anything outside one currency does not
+    "work when you paste a link"."""
+    assert parse_money(text) == expected
+
+
+USD_CHECKOUT = """<!doctype html><meta charset="utf-8"><body>
+  <div><span>Cotton Tee</span><span>$19.99<s>$29.99</s><span>33% off</span></span></div>
+  <div><span>Shipping</span><span>$4.50</span></div>
+  <div><span>Sales Tax</span><span>$1.75</span></div>
+  <div><span>Total</span><span>$26.24</span></div></body>"""
+
+
+def test_a_dollar_checkout_is_read_end_to_end(tmp_path):
+    state = _states_for(USD_CHECKOUT, tmp_path)[0]
+    assert state.price == 26.24, f"read {state.price}"
+    names = {i["name"] for i in state.line_items}
+    assert not any("$" in n for n in names), f"a stray currency mark survived: {names}"
+    assert abs(sum(i["price"] for i in state.line_items) - state.price) < 0.01
+
+
+PRODUCT_CARDS = """<!doctype html><meta charset="utf-8"><body>
+  <div class="card"><h3>Blue Top</h3><p>$5.00</p><a href="#">Add to cart</a></div>
+  <div class="card"><h3>Men Tshirt</h3><p>$4.00</p><a href="#">Add to cart</a></div>
+  <div class="row"><span>Quantity:</span><span>$5.00</span><a href="#">Add to cart</a></div>
+  </body>"""
+
+
+def test_a_buy_button_does_not_become_part_of_a_charge_name(tmp_path):
+    """A product card is the innermost element holding both a name and a
+    price, so the row scanner picks it -- correctly -- and the button's words
+    ride along. A real listing page produced line items called "Blue Top Add
+    to cart" and "Quantity: Add to cart". Printing either in a finding as the
+    name of an undisclosed fee is indefensible."""
+    state = _states_for(PRODUCT_CARDS, tmp_path)[0]
+    names = [i["name"] for i in state.line_items]
+    for name in names:
+        assert "add to cart" not in name.lower(), f"button text in a charge name: {names}"
+    assert not any(n.rstrip(":").strip().lower() == "quantity" for n in names), (
+        f"'Quantity' is a form caption, not a charge: {names}"
+    )
+
+
+def test_a_catalogue_is_not_summed_as_one_order(tmp_path):
+    """The landmine this run walked past by luck.
+
+    The row scanner returned 36 line items on a real listing page, one per
+    product on the shelf. Had that page been the last step of a funnel, DP-08
+    would have compared the first price against the value of the ENTIRE
+    CATALOGUE and reported the shop, at PROVABLE 1.0, for concealing charges
+    that were simply other products for sale.
+    """
+    listing = tmp_path / "listing.html"
+    rows = "".join(
+        f'<div><span>Item {i}</span><span>$50.00</span></div>' for i in range(30)
+    )
+    listing.write_text(
+        f'<!doctype html><meta charset="utf-8"><body><p>Price: $50.00</p>{rows}</body>',
+        encoding="utf-8")
+    entry = tmp_path / "entry.html"
+    entry.write_text('<!doctype html><meta charset="utf-8"><body><p>$50.00</p></body>',
+                     encoding="utf-8")
+
+    adapter = SiteAdapter(
+        site_name="a shop with a catalogue page",
+        funnel_steps=[
+            FunnelStep(name="entry", url="file://" + str(entry.resolve())),
+            FunnelStep(name="listing", url="file://" + str(listing.resolve())),
+        ],
+    )
+    trace = walk_funnel(adapter, screenshot_dir=str(tmp_path / "shots"))
+    codes = [v.pattern_code for v in audit(trace)]
+    assert "DP-08" not in codes, (
+        "the catalogue was summed as if it were one order's fee breakdown; "
+        f"findings: {codes}"
+    )
+
+
+def test_an_overlay_we_cannot_see_into_is_not_called_inescapable(tmp_path):
+    """DP-04's entire claim is "there was no way out". A crawler cannot read
+    into another document, so for an ad or consent iframe it has not observed
+    an absence -- it has observed its own blind spot.
+
+    This fired at CORROBORATED 0.75 against an automation sandbox whose
+    overlay did have a close control; one step later the crawler clicked its
+    way past the very same overlay.
+    """
+    page = tmp_path / "ad.html"
+    page.write_text(
+        '<!doctype html><meta charset="utf-8"><body><p>$10.00 Shop now</p>'
+        '<div role="dialog" style="position:fixed;top:0;left:0;width:1280px;'
+        'height:900px;z-index:99"><iframe srcdoc="&lt;p&gt;advert&lt;/p&gt;" '
+        'width="1200" height="800"></iframe></div></body>',
+        encoding="utf-8")
+    adapter = SiteAdapter(
+        site_name="shop running a full-page ad frame",
+        funnel_steps=[FunnelStep(name="entry", url="file://" + str(page.resolve()))],
+    )
+    trace = walk_funnel(adapter, screenshot_dir=str(tmp_path / "shots"))
+    codes = [v.pattern_code for v in audit(trace)]
+    assert "DP-04" not in codes, f"accused a site over an unreadable overlay: {codes}"
+
+
+def test_a_newsletter_footer_is_not_a_subscription_with_no_way_out(tmp_path):
+    """The second false positive from the same run. A shop with a newsletter
+    box and the word "monthly" somewhere on the page was reported for offering
+    a recurring commitment with no cancellation route. It sells no
+    subscription at all -- and nearly every shop on the internet has that
+    footer."""
+    page = tmp_path / "shop.html"
+    page.write_text(
+        '<!doctype html><meta charset="utf-8"><body>'
+        '<p>Cotton Tee $19.99</p><p>Total $19.99</p>'
+        '<p>New arrivals added monthly.</p>'
+        '<footer><h4>Subscribe</h4><p>Get our newsletter for updates.</p>'
+        '<button>Subscribe</button></footer></body>',
+        encoding="utf-8")
+    adapter = SiteAdapter(
+        site_name="an ordinary shop with a newsletter box",
+        funnel_steps=[FunnelStep(name="entry", url="file://" + str(page.resolve()))],
+    )
+    trace = walk_funnel(adapter, screenshot_dir=str(tmp_path / "shots"))
+    codes = [v.pattern_code for v in audit(trace)]
+    assert "DP-05" not in codes, f"a newsletter was read as a subscription trap: {codes}"
+
+
 # --- The capability, proven on a deceptive page ---------------------------
 
 def test_drip_pricing_is_caught_with_no_machine_readable_data(tmp_path):

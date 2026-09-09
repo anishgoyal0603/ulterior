@@ -57,6 +57,13 @@ class ModalInfo:
     viewport_coverage: float        # 0.0-1.0 share of the viewport it covers
     dismiss_controls: List[str] = field(default_factory=list)  # texts of X/close/no-thanks controls
     bbox: Optional[dict] = None
+    # True when the overlay's content lives in an <iframe> -- an ad, a consent
+    # vendor, an embedded widget. query_selector_all cannot see into another
+    # document, so "no dismissal control" is not a finding about the overlay;
+    # it is a statement about what this crawler is able to look at. DP-04
+    # refuses to report those, because a claim of absence is worth nothing
+    # when you could not have seen the thing you say is missing.
+    contents_unreadable: bool = False
 
 
 @dataclass
@@ -115,6 +122,10 @@ class PageState:
     full_text: str
     urgency_phrases_found: List[str]
     raw_html: str
+    # As the page writes it: "$", "₹", "USD", or "" when unknown. Findings
+    # used to hardcode a rupee sign, so a US checkout would have been
+    # described in rupees the moment the extractor could read dollars.
+    price_currency: str = ""
     disclosure_labels: List["DisclosureLabel"] = field(default_factory=list)
     modals: List["ModalInfo"] = field(default_factory=list)
     links: List["LinkInfo"] = field(default_factory=list)
@@ -183,18 +194,71 @@ _BG_WALK_JS = (
 # thousands grouping is sometimes Western (1,234,567) and sometimes Indian
 # (12,34,567). Both parse here.
 
-_CURRENCY = r"(?:₹|Rs\.?|INR)"
+# Currencies, longest alternative first so "US$" wins over "$".
+#
+# This list was ₹/Rs./INR only, which is defensible for a tool built around
+# India's CCPA guidelines and was still a serious mistake: pointed at the
+# public automation sandboxes, the extractor read NOTHING on any storefront
+# priced in dollars. demo.opencart.com and demo.saleor.io both came back
+# "no price could be read", and DP-08 -- the strongest claim this project
+# makes -- cannot run without a price. A tool that silently declines to
+# measure anything outside one currency is not a tool that "works when you
+# paste a link", which is the whole promise.
+#
+# Not handled, deliberately: European decimal convention (1.299,50). Guessing
+# between "1.299" as one thousand two hundred and as one-point-two-nine-nine
+# would put a wrong number into a finding, and a wrong number is worse than
+# no number.
+_CURRENCY = (
+    r"(?:₹|Rs\.?|INR"
+    r"|US\$|A\$|C\$|S\$|\$"
+    r"|€|£|¥"
+    r"|USD|EUR|GBP|JPY|AUD|CAD|CHF|SGD|AED|SAR)"
+)
+# The same set as a TRAILING code: "19.99 USD", "500 INR".
+_CURRENCY_CODE = r"(?:INR|USD|EUR|GBP|JPY|AUD|CAD|CHF|SGD|AED|SAR)"
 # Either grouped (6,530 / 12,34,567 / 1,234,567) or a plain run of digits
 # (5065). The grouped alternative comes first so it wins where both could
 # match, otherwise "6,530" would parse as 6.
 _AMOUNT = r"(?:\d{1,3}(?:[,\u00a0\s]\d{2,3})+|\d+)(?:\.\d{1,2})?"
-_MONEY_RE = re.compile(rf"{_CURRENCY}\s*({_AMOUNT})|({_AMOUNT})\s*/-", re.IGNORECASE)
+_MONEY_RE = re.compile(
+    rf"{_CURRENCY}\s*({_AMOUNT})"                  # ₹ 6,530   $19.99   € 40
+    rf"|({_AMOUNT})\s*/-"                          # 6,530/-  (Indian convention)
+    rf"|({_AMOUNT})\s*{_CURRENCY_CODE}\b",         # 19.99 USD
+    re.IGNORECASE,
+)
 
 # "67% off", "20 % discount", "18%". Removed from a row BEFORE the money
 # pattern runs, because adjacent inline spans render with no separator:
 # "<s>₹899</s><span>67% off</span>" is the single string "₹89967% off", and
 # stripping money first eats "₹89967" and leaves the label "% off".
 _PERCENT_BADGE_RE = re.compile(r"\d[\d,.]*\s*%\s*(?:off|discount)?", re.IGNORECASE)
+
+# A currency mark with no number left beside it, after the amounts have been
+# stripped out. "Cotton Tee$19.99$29.99" reduces to "Cotton Tee$", and that
+# stray symbol would be published as part of a charge's name.
+_STRAY_CURRENCY_RE = re.compile(rf"{_CURRENCY}(?![A-Za-z])", re.IGNORECASE)
+
+# Call-to-action text that sits inside a product card. The card is the
+# innermost element carrying both a name and a price, so the row scanner
+# picks it -- correctly -- and the button's words come along with it. On a
+# real listing page this produced line items called "Blue Top Add to cart"
+# and "Quantity: Add to cart". Those are not charges, and printing one in a
+# finding as the name of an undisclosed fee is indefensible.
+_CTA_TAIL_RE = re.compile(
+    r"\b(add to (cart|bag|basket|trolley|tote)|buy now|shop now|add to wishlist"
+    r"|view (product|details|item)|quick view|select options|choose options"
+    r"|out of stock|in stock|compare|wishlist)\b.*$",
+    re.IGNORECASE,
+)
+
+# Product-attribute captions, which pair with a price on a product page but
+# name no charge. "Quantity: $19.99" is the price of the item, labelled by
+# the form control next to it.
+_ATTRIBUTE_LABELS = {
+    "quantity", "qty", "size", "color", "colour", "availability", "condition",
+    "brand", "category", "sku", "model", "price", "options", "product",
+}
 
 # Words that mark the figure a shopper will actually be charged.
 _TOTAL_WORDS = re.compile(
@@ -205,20 +269,46 @@ _TOTAL_WORDS = re.compile(
 def parse_money(text: str):
     """The first monetary amount in this text, or None.
 
-    Handles ₹ / Rs. / INR prefixes, the trailing "/-" Indian sites use, and
-    both Western and Indian digit grouping.
+    Handles ₹ / Rs. / INR / $ / € / £ / ¥ and the three-letter codes, the
+    trailing "/-" Indian sites use, and both Western and Indian grouping.
     """
     if not text:
         return None
     match = _MONEY_RE.search(text)
     if not match:
         return None
-    raw = match.group(1) or match.group(2)
+    raw = match.group(1) or match.group(2) or match.group(3)
     cleaned = re.sub(r"[,\u00a0\s]", "", raw)
     try:
         return float(cleaned)
     except ValueError:
         return None
+
+
+def money_symbol(text: str) -> str:
+    """The currency this text prices things in, as written, or "".
+
+    Needed because the findings used to hardcode a rupee sign. Once the
+    extractor could read dollars, a US storefront's drip-pricing finding would
+    have said "the final total is Rs 26.24" about a $26.24 checkout. A report
+    that names a company and states the wrong currency is wrong on its face,
+    and every other number in it becomes suspect.
+    """
+    if not text:
+        return ""
+    match = _MONEY_RE.search(text)
+    if not match:
+        return ""
+    found = re.search(_CURRENCY, match.group(0), re.IGNORECASE)
+    return found.group(0) if found else ""
+
+
+def format_money(amount, currency: str = "") -> str:
+    """An amount written the way its own currency is written."""
+    mark = (currency or "").strip()
+    if mark and mark[-1].isalpha():
+        return f"{amount} {mark}"
+    return f"{mark}{amount}"
 
 
 def _money_from_lines(lines, prefer_total: bool):
@@ -253,7 +343,11 @@ def _money_from_lines(lines, prefer_total: bool):
 # which is that row, label and amount together.
 _ROW_TEXT_JS = """
 () => {
-  const money = /(?:₹|Rs\\.?|INR)\\s*[\\d,]|\\d[\\d,\\s]*\\/-/i;
+  // Kept in step with _CURRENCY on the Python side. When this knew only
+  // rupees, a dollar-priced storefront yielded no rows at all and the audit
+  // reported "no price could be read" on a perfectly readable page.
+  const CUR = "(?:\\u20b9|Rs\\\\.?|INR|US\\\\$|A\\\\$|C\\\\$|S\\\\$|\\\\$|\\u20ac|\\u00a3|\\u00a5|USD|EUR|GBP|JPY|AUD|CAD|CHF|SGD|AED|SAR)";
+  const money = new RegExp(CUR + "\\\\s*[\\\\d,]|\\\\d[\\\\d,\\\\s]*\\\\/-", "i");
   // A discount badge is removed FIRST, before the money strip, and this
   // order is the whole point. Adjacent inline spans render with no
   // separator, so "<s>₹899</s><span>67% off</span>" reads as "₹89967% off",
@@ -266,7 +360,7 @@ _ROW_TEXT_JS = """
   const stripPercent = (t) => t.replace(/\\d[\\d,.]*\\s*%\\s*(off|discount)?/gi, ' ');
   const stripMoney = (t) =>
     stripPercent(t)
-     .replace(/(?:₹|Rs\\.?|INR)\\s*[\\d][\\d,\\s]*(?:\\.\\d{1,2})?/gi, ' ')
+     .replace(new RegExp(CUR + "\\\\s*[\\\\d][\\\\d,\\\\s]*(?:\\\\.\\\\d{1,2})?", "gi"), ' ')
      .replace(/[\\d,]+\\s*\\/-/g, ' ')
      .replace(/\\s+/g, ' ').trim();
 
@@ -334,6 +428,8 @@ def _line_items_from_text(lines):
         # label "% off" if money is stripped first. See _ROW_TEXT_JS.
         label = _PERCENT_BADGE_RE.sub(" ", line)
         label = _MONEY_RE.sub("", label)
+        label = _STRAY_CURRENCY_RE.sub(" ", label)
+        label = _CTA_TAIL_RE.sub(" ", label)
         label = re.sub(r"\(\s*\)", " ", label)          # "GST ( )" -> "GST"
         label = re.sub(r"[-–—:]+\s*$", "", label).strip(" \u00a0\t-–—:")
         label = re.sub(r"\s+", " ", label).strip()
@@ -341,6 +437,8 @@ def _line_items_from_text(lines):
         # left over from a price display. Reporting it would put "%" or "-"
         # into a public finding as the name of an undisclosed charge.
         if not label or len(label) > 60 or not re.search(r"[A-Za-z]", label):
+            continue
+        if label.rstrip(":").strip().lower() in _ATTRIBUTE_LABELS:
             continue
         if _TOTAL_WORDS.search(label):
             continue
@@ -557,6 +655,7 @@ def extract_page_state(page, step_name: str, price_selector_override: str = None
 
     return PageState(
         url=page.url, step_name=step_name, price=price, price_source=price_source,
+        price_currency=money_symbol(full_text or ""),
         line_items=line_items, checkboxes=checkboxes, buttons=buttons,
         full_text=full_text, urgency_phrases_found=urgency_found, raw_html=html,
         disclosure_labels=disclosure_labels,
@@ -665,11 +764,17 @@ def _extract_modals(page) -> List["ModalInfo"]:
         except Exception:
             pass
 
+        try:
+            unreadable = bool(el.query_selector("iframe, embed, object"))
+        except Exception:
+            unreadable = True
+
         modals.append(ModalInfo(
             signature=modal_signature(text, el_id, el_class),
             text=text[:500], is_blocking=is_blocking,
             viewport_coverage=round(coverage, 3),
             dismiss_controls=dismiss, bbox=box,
+            contents_unreadable=unreadable,
         ))
     return modals
 

@@ -312,10 +312,18 @@ def walk_discovered_funnel(start_url: str, screenshot_dir: str = DEFAULT_EVIDENC
             if refused_controls:
                 # Do not diagnose bot protection on a page that was obviously a
                 # real checkout -- the walk ended because it was supposed to.
+                #
+                # The reason is spelled out per control rather than asserted:
+                # this said "the next control commits a purchase" on
+                # saucedemo.com, where the refused control was a LOGIN button.
+                # Refusing to sign in and refusing to pay are both correct and
+                # they are not the same fact, and a report that states the
+                # wrong one is wrong even when the behaviour was right.
                 log.notes.append(
-                    "Only the starting page could be examined, because the next "
-                    "control on it commits a purchase and this tool never "
-                    "presses one. Findings below cover that one page only."
+                    "Only the starting page could be examined. The controls that "
+                    "would have gone further are on the never-click list -- each "
+                    "one is named above with the rule it matched. Findings below "
+                    "cover that one page only."
                 )
             else:
                 log.notes.append(

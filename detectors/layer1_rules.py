@@ -12,7 +12,7 @@ import re
 from .taxonomy import BY_CODE, PROVABLE, CORROBORATED, INDICATIVE, clamp_confidence
 from .vocab import is_recurring_label
 from capture.funnel_walker import FunnelTrace
-from capture.state_extractor import PageState
+from capture.state_extractor import PageState, format_money
 
 
 @dataclass
@@ -41,6 +41,11 @@ def _mentions_amount(text: str, amount: float) -> bool:
     return any(re.sub(r"[\s\u00a0]", "", v) in haystack for v in variants)
 
 
+# The largest number of rows that can plausibly be ONE order's fee
+# breakdown. Above this, the "itemisation" is a product catalogue.
+_MAX_BREAKDOWN_ROWS = 12
+
+
 def detect_drip_pricing(trace: FunnelTrace) -> List[Violation]:
     """Compare the earliest disclosed price to the final checkout/payment total.
     A materially higher final total that wasn't disclosed at the first step
@@ -51,11 +56,38 @@ def detect_drip_pricing(trace: FunnelTrace) -> List[Violation]:
         return violations
 
     first, last = priced_states[0], priced_states[-1]
-    # prefer the itemized total if line items are present at the last step
-    final_total = sum(li["price"] for li in last.line_items) if last.line_items else last.price
+    # Prefer the itemised total if line items are present at the last step --
+    # but only when the itemisation is plausibly a breakdown OF THIS ORDER.
+    #
+    # A catalogue page defeats that assumption completely. Pointed at a real
+    # storefront's product listing, the row scanner returned 36 line items,
+    # one per product card, summing to many times anything a shopper would
+    # pay. Had that page been the final step, DP-08 would have compared the
+    # first price against the value of the entire catalogue and reported a
+    # shop, at PROVABLE 1.0, for concealing charges that were other products
+    # on the shelf.
+    #
+    # The discriminator is ROW COUNT, and the first attempt at this got it
+    # wrong in a way the compliant corpus caught immediately: comparing the
+    # itemised sum against the page's own price and rejecting the itemisation
+    # when it overshoots silences DP-08 completely, because a drip-priced
+    # checkout is PRECISELY the case where the components exceed the headline
+    # figure. The guard would have removed the detector it was protecting.
+    #
+    # An order's fee breakdown is a handful of rows. A catalogue is dozens.
+    # Falling back to the page's stated price costs at most a missed finding;
+    # trusting a catalogue costs a public accusation at the highest tier, so
+    # the asymmetry decides which way to lean.
+    itemised = sum(li["price"] for li in last.line_items) if last.line_items else None
+    final_total = last.price
+    if itemised is not None and len(last.line_items) <= _MAX_BREAKDOWN_ROWS:
+        final_total = itemised
 
     if final_total and first.price and final_total > first.price * 1.02:  # >2% tolerance for rounding
         hidden = round(final_total - first.price, 2)
+        # The page's own currency. Printing a rupee sign on a dollar
+        # checkout would make every figure in the finding suspect.
+        cur = last.price_currency or first.price_currency or ""
         undisclosed = [li for li in last.line_items if li["name"] not in ("", None)
                         and li["price"] > 0 and li["name"].lower() not in first.full_text.lower()]
 
@@ -92,9 +124,10 @@ def detect_drip_pricing(trace: FunnelTrace) -> List[Violation]:
                 "undisclosed_line_items": [li["name"] for li in undisclosed],
             },
             layer=1,
-            explanation=(f"Price disclosed at '{first.step_name}' was ₹{first.price}, but the "
-                         f"final total at '{last.step_name}' is ₹{final_total} -- ₹{hidden} in "
-                         f"charges were not shown upfront."),
+            explanation=(f"Price disclosed at '{first.step_name}' was "
+                         f"{format_money(first.price, cur)}, but the final total at "
+                         f"'{last.step_name}' is {format_money(final_total, cur)} -- "
+                         f"{format_money(hidden, cur)} in charges were not shown upfront."),
         ))
     return violations
 
@@ -134,7 +167,7 @@ def detect_basket_sneaking_and_prechecked(trace: FunnelTrace) -> List[Violation]
                 if is_recurring_label(cb.label_text):
                     continue
                 matches_charge = any(name in cb.label_text.lower() for name in chargeable_names) \
-                    or "₹" in cb.label_text or "insurance" in cb.label_text.lower() \
+                    or re.search(r"[₹$€£¥]", cb.label_text) or "insurance" in cb.label_text.lower() \
                     or "protection" in cb.label_text.lower()
                 if matches_charge:
                     identity = (cb.id, cb.label_text)
@@ -411,8 +444,10 @@ def detect_reference_pricing(trace: FunnelTrace) -> List[Violation]:
                         evidence={"evidence_tier": INDICATIVE, "claimed_was_price": was_price, "claimed_now_price": now_price,
                                   "claimed_discount_pct": round(discount_pct, 1)},
                         layer=1,
-                        explanation=(f"Claimed discount of {discount_pct:.0f}% (₹{was_price} -> "
-                                     f"₹{now_price}) is implausibly large -- flagged for human "
+                        explanation=(f"Claimed discount of {discount_pct:.0f}% "
+                                     f"({format_money(was_price, state.price_currency)} -> "
+                                     f"{format_money(now_price, state.price_currency)}) is "
+                                     f"implausibly large -- flagged for human "
                                      f"cross-reference against real price history, not asserted as fraud."),
                     ))
     return violations
@@ -514,8 +549,10 @@ def detect_bait_and_switch(trace: FunnelTrace) -> List[Violation]:
                         "actual_price_on_next_page": nxt.price,
                     },
                     layer=1,
-                    explanation=(f"Link/button '{btn.text}' specifically promised ₹{claimed}, "
-                                 f"but the resulting page '{nxt.step_name}' shows ₹{nxt.price} -- "
+                    explanation=(f"Link/button '{btn.text}' specifically promised "
+                                 f"{format_money(claimed, nxt.price_currency)}, but the resulting "
+                                 f"page '{nxt.step_name}' shows "
+                                 f"{format_money(nxt.price, nxt.price_currency)} -- "
                                  f"the promised outcome does not match what was delivered."),
                 ))
     return violations

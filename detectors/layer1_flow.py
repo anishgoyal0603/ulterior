@@ -171,6 +171,20 @@ def detect_forced_action(trace: FunnelTrace) -> List[Violation]:
                 continue
             if modal.viewport_coverage < 0.10:
                 continue  # a small toast is an annoyance, not a forced action
+            if getattr(modal, "contents_unreadable", False):
+                # The overlay's content is in an iframe -- an ad, a consent
+                # vendor, an embedded widget -- and a crawler cannot read into
+                # another document. On a real automation sandbox this fired at
+                # CORROBORATED 0.75 against a site whose overlay DID have a
+                # close button; the crawler simply could not see it, and one
+                # step later clicked its way past the same overlay.
+                #
+                # This finding's entire content is "there was no way out". You
+                # cannot say that about a box you could not open. Skipping is
+                # not caution for its own sake: the alternative is publishing
+                # that a named site trapped its users, on the strength of the
+                # crawler's own blind spot.
+                continue
             violations.append(Violation(
                 pattern_code="DP-04", pattern_name=BY_CODE["DP-04"].name,
                 step_name=state.step_name,
@@ -274,7 +288,22 @@ def detect_subscription_trap(trace: FunnelTrace) -> List[Violation]:
         ))
 
     # (c) no cancellation route anywhere
-    has_recurring = any(_matches_any(s.full_text, RECURRING_BILLING_TERMS) for s in trace.states)
+    #
+    # Gated on a real PAID commitment, not on recurring words appearing
+    # somewhere in the page text. The text test alone fired on an automation
+    # sandbox with no subscription product at all: it has a newsletter box in
+    # its footer, like nearly every shop alive, and billing vocabulary
+    # elsewhere on the page was enough to conclude that a recurring commitment
+    # existed with no way to cancel it.
+    #
+    # _first_commitment_state already knows a newsletter "Subscribe" is not a
+    # commitment -- that exclusion was written for branch (a) and simply never
+    # reached branch (c). Reusing it is both the correct rule and the one the
+    # compliant corpus already covers.
+    has_recurring = (
+        offer_state is not None
+        and any(_matches_any(s.full_text, RECURRING_BILLING_TERMS) for s in trace.states)
+    )
     if has_recurring and not cancel_steps:
         route_found = False
         for state in trace.states:
@@ -319,6 +348,16 @@ NON_COMMITMENT_SUBSCRIBE = [
     r"\bnotify me\b", r"\balerts?\b",
 ]
 
+# A recurring PRICE: an amount tied to a period. This is what a paid plan has
+# and a newsletter does not, and it is the only reliable way to tell the two
+# apart when both buttons just say "Subscribe".
+_RECURRING_PRICE_RE = re.compile(
+    r"(?:₹|Rs\.?|INR|US\$|\$|€|£|¥)\s*[\d,]+(?:\.\d{1,2})?\s*"
+    r"(?:/|per\s+|a\s+|each\s+)?\s*(?:mo\b|month|yr\b|year|week|annually)"
+    r"|\b(?:billed|renews?|charged)\s+(?:monthly|annually|yearly|weekly)\b",
+    re.IGNORECASE,
+)
+
 COMMITMENT_CTA = [
     r"\bstart (my )?(free )?trial\b", r"\bsubscribe\b", r"\bstart (my )?membership\b",
     r"\bget (started|premium|plus|pro)\b", r"\bupgrade\b", r"\bjoin now\b",
@@ -338,6 +377,24 @@ def _first_commitment_state(trace: FunnelTrace):
             if not _matches_any(button.text, COMMITMENT_CTA):
                 continue
             if _matches_any(button.text, NON_COMMITMENT_SUBSCRIBE):
+                continue
+            # The button rarely carries the word "newsletter". On a real
+            # storefront the footer reads:  <h4>Subscribe</h4>  <p>Get our
+            # newsletter…</p>  <button>Subscribe</button>. The button text
+            # alone is "Subscribe", which is indistinguishable from a paid
+            # plan's CTA -- so an ordinary shop with no subscription product
+            # was reported for offering a recurring commitment with no way to
+            # cancel it.
+            #
+            # What actually separates the two is a PRICE. A paid plan states
+            # what it costs and how often; a newsletter costs nothing. So a
+            # recurring price makes it a commitment whatever the surrounding
+            # words, and mailing-list language with no recurring price makes
+            # it a newsletter.
+            text = state.full_text or ""
+            if _RECURRING_PRICE_RE.search(text):
+                return state, index
+            if _matches_any(text, NON_COMMITMENT_SUBSCRIBE):
                 continue
             return state, index
     return None, -1

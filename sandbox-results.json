@@ -1,0 +1,78 @@
+[
+  {
+    "url": "https://www.saucedemo.com/",
+    "name": "Swag Labs (Sauce Labs)",
+    "stages": [
+      "entry"
+    ],
+    "read_anything": false,
+    "found_money": false,
+    "prices": [
+      null
+    ],
+    "findings": []
+  },
+  {
+    "url": "https://automationexercise.com/products",
+    "name": "Automation Exercise",
+    "stages": [
+      "entry",
+      "product",
+      "cart",
+      "checkout"
+    ],
+    "read_anything": true,
+    "found_money": true,
+    "prices": [
+      500.0,
+      500.0,
+      500.0,
+      500.0
+    ],
+    "findings": [
+      {
+        "code": "DP-04",
+        "tier": "corroborated",
+        "confidence": 0.75
+      },
+      {
+        "code": "DP-05",
+        "tier": "indicative",
+        "confidence": 0.45
+      }
+    ]
+  },
+  {
+    "url": "https://ecommerce-playground.lambdatest.com/",
+    "name": "LambdaTest OpenCart playground",
+    "error": "Could not resolve hostname: ecommerce-playground.lambdatest.com"
+  },
+  {
+    "url": "https://demo.opencart.com/",
+    "name": "OpenCart official demo",
+    "stages": [
+      "entry"
+    ],
+    "read_anything": true,
+    "found_money": false,
+    "prices": [
+      null
+    ],
+    "findings": []
+  },
+  {
+    "url": "https://demo.saleor.io/",
+    "name": "Saleor storefront (React)",
+    "stages": [
+      "entry",
+      "cart"
+    ],
+    "read_anything": true,
+    "found_money": false,
+    "prices": [
+      null,
+      null
+    ],
+    "findings": []
+  }
+]

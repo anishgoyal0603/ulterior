@@ -71,6 +71,19 @@ def _refuse_early(url: str) -> str:
         validate_target_url(url)
         return ""
     except UnsafeURLError as exc:
+        # A DNS failure is not a policy refusal, and printing the local-target
+        # advice for one actively misleads: the LambdaTest playground failed to
+        # resolve, and the tool answered by explaining how to audit a store on
+        # your own machine. Different problem, different fix.
+        if "resolve" in str(exc).lower():
+            return (
+                f"{exc}\n"
+                "    That is a DNS failure, not a refusal by this tool -- the\n"
+                "    hostname could not be looked up at all. Open the URL in a\n"
+                "    browser: if it does not load there either, the site is down\n"
+                "    or your network is blocking it, and there is nothing to fix\n"
+                "    here."
+            )
         if config.ALLOW_LOCAL_TARGETS:
             return f"{exc}"
         return (
