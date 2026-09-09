@@ -140,6 +140,20 @@ def audit_one(url: str, name: str = "", show_html: bool = False, headless: bool 
         print(f"        checkboxes    : {len(state.checkboxes)}"
               f"   pre-ticked: {sum(1 for c in state.checkboxes if c.is_prechecked)}")
         print(f"        buttons       : {len(state.buttons)}")
+        # Overlays, spelled out. A DP-04 finding is a claim about what an
+        # overlay did NOT offer, and that claim cannot be checked from a
+        # confidence score. Printing what the crawler saw -- how much it
+        # covered, whether the contents were readable, which dismissal
+        # controls it recognised -- is what let two false positives on this
+        # detector be diagnosed instead of argued about.
+        for modal in state.modals:
+            if not modal.is_blocking or modal.viewport_coverage < 0.10:
+                continue
+            print(f"        overlay       : {modal.viewport_coverage:.0%} of viewport"
+                  f"   readable: {not getattr(modal, 'contents_unreadable', False)}"
+                  f"   dismiss: {modal.dismiss_controls or 'none recognised'}")
+            snippet = " ".join((modal.text or "").split())[:120]
+            print(f"            says: {snippet!r}")
         if show_html:
             print(f"        first 400 chars of text: {(state.full_text or '')[:400]!r}")
 

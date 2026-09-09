@@ -88,12 +88,18 @@ Any `2.x` version is fine.
 ## 3. Clone the repository
 
 ```powershell
-cd $HOME\Downloads
-git clone https://github.com/anishgoyal0603/ulterior-dark-pattern-auditor.git
-cd ulterior-dark-pattern-auditor
+cd $HOME\Documents
+git clone https://github.com/anishgoyal0603/ulterior.git
+cd ulterior
 ```
 
 Every remaining command assumes you are inside that folder.
+
+> **Clone into Documents, not Downloads.** Anything is fine technically, but
+> keeping the project somewhere you never unzip things into avoids ending up
+> with two copies of it. Two copies is how someone edits one and pushes the
+> other. If a command ever behaves strangely, run `pwd` first and check which
+> folder you are standing in.
 
 The first `git push` will ask you to sign in to GitHub. A browser window
 opens; approve it and the push continues.
@@ -191,33 +197,92 @@ Stop the server first (**Ctrl+C**), then:
 .\.venv\Scripts\python.exe -m pytest tests\ -q -m "not ui"
 ```
 
-Expect **248 passed**. If it says anything about tests being *skipped*, the
-test-only dependencies are missing — `run_demo.ps1` installs them, but if you
-set the virtual environment up by hand, add:
+Expect:
+
+```
+271 passed, 28 deselected, 1 warning
+```
+
+### Reading that line
+
+**`28 deselected` is not a problem, and there is nothing to remove.** It is
+that command doing exactly what you asked. `-m "not ui"` means *skip the tests
+marked `ui`* — the 28 browser tests that launch a real server and drive a real
+Chromium window. pytest is reporting how many it set aside on your
+instruction. Drop the flag and all 299 run.
+
+**`1 warning` is also fine.** It comes from inside Starlette's own code, not
+this project. Ours are at zero and a test keeps them there.
+
+**The word `skipped`, if you ever see it, IS a problem.** A skipped test is
+not a passing test. It usually means the test-only dependency is missing —
+`run_demo.ps1` installs it, but if you built the virtual environment by hand:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 ```
 
-That one package (`pdfminer.six`) is what lets six tests read the generated PDF
-back and check what it actually says. A skipped test is not a passing test, and
-those six guard the wording of a report that names a company.
+That one package (`pdfminer.six`) lets six tests read the generated PDF back
+and check what it actually says. Those six guard the wording of a report that
+names a company, and they were silently skipping on every laptop for days
+because nobody noticed the word in a wall of output.
 
-That is the fast set (~1 minute). The full set adds browser tests that start a
-real server and click every control, and takes about four minutes:
+### The full set
+
+About six minutes. Runs everything, including the browser tests:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests\ -q
 node tests\test_extension_cache.js
 ```
 
-Expect **238 passed** and **ALL TESTS PASSED**. A different number is worth
-reporting rather than working around — several of these tests exist because
-the detector was accusing honest shops, and a green suite is the only thing
-standing between a change and that happening again.
+Expect **299 passed** and **ALL TESTS PASSED** (12 checks on the browser
+extension; `node` is only needed for this one file — skip it if you have not
+installed Node).
+
+A different number is worth reporting rather than working around. Many of
+these tests exist because a detector was accusing honest shops, and a green
+suite is the only thing standing between a change and that happening again.
 
 **Run the tests before you push.** CI runs them on every pull request anyway,
 but finding out locally takes one minute instead of five.
+
+## 7b. Auditing a real website
+
+The demo and the dashboard audit bundled storefronts. To point the tool at a
+real site, use the command-line harness:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\audit_url.py --preset sandboxes
+```
+
+That walks five public automation sandboxes — sites the testing community
+publishes *so that* tools crawl them. One site at a time:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\audit_url.py https://demo.opencart.com/
+```
+
+Why this exists rather than just using the dashboard: the dashboard reports
+"no findings", and **"no findings" and "the crawler saw an empty page" look
+identical**. This prints what was actually read on each page — text length,
+the price and where it came from, every control clicked and every control
+refused — and ends with a verdict that separates them:
+
+| Verdict | Meaning |
+|---|---|
+| INCONCLUSIVE | Almost nothing rendered. **Not a clean result.** |
+| PARTIAL | Pages rendered, no price found. Price detectors cannot run. |
+| CLEAN | Rendered, priced, nothing found. A real result. |
+| _n_ finding(s) | Findings on pages the crawler genuinely read. |
+
+**Only audit sites you are allowed to audit**: those sandboxes, an
+open-source demo, or a store you own. Not because it would break — the
+crawler never clicks a control that could spend money — but because a finding
+is a public statement that a named business is deceiving customers.
+
+`TESTING_REAL_SITES.md` has the full procedure, including how to audit a
+store running on your own machine.
 
 ## 8. Making a change
 
@@ -323,9 +388,9 @@ Same steps, two differences: install Python 3.12 your usual way
 the shell launcher.
 
 ```bash
-cd ~/Downloads
-git clone https://github.com/anishgoyal0603/ulterior-dark-pattern-auditor.git
-cd ulterior-dark-pattern-auditor
+cd ~/Documents
+git clone https://github.com/anishgoyal0603/ulterior.git
+cd ulterior
 ./run_demo.sh
 ```
 

@@ -209,11 +209,23 @@ _BG_WALK_JS = (
 # between "1.299" as one thousand two hundred and as one-point-two-nine-nine
 # would put a wrong number into a finding, and a wrong number is worse than
 # no number.
+# The (?<![A-Za-z]) guard is not pedantry. "Rs" is a currency mark and it is
+# also the middle of ordinary words: on a real storefront, the product
+# "SNEAKERS Plimsolls" came back as line item "SNEAKE Plimsolls", because the
+# RS in SNEAKERS was stripped as a rupee sign. Worse than ugly -- "Rs 55"
+# inside a word would also PARSE as fifty-five rupees.
 _CURRENCY = (
-    r"(?:₹|Rs\.?|INR"
-    r"|US\$|A\$|C\$|S\$|\$"
-    r"|€|£|¥"
-    r"|USD|EUR|GBP|JPY|AUD|CAD|CHF|SGD|AED|SAR)"
+    # Symbols, unguarded: markup concatenates "Tee$19.99" with no space, so a
+    # symbol MUST be allowed to follow a letter. Guarding these was a
+    # regression that made the first price on such a row invisible and handed
+    # back the struck-through one instead.
+    r"(?:₹|€|£|¥|\$"
+    # Letter codes, guarded: "Rs" is a currency mark and also the middle of
+    # ordinary words. Unguarded, the product "SNEAKERS Plimsolls" came back as
+    # the line item "SNEAKE Plimsolls", and "SNEAKERS 55" would have PARSED as
+    # fifty-five rupees -- a wrong number, not a cosmetic blemish.
+    r"|(?<![A-Za-z])(?:Rs\.?|INR|US\$|A\$|C\$|S\$"
+    r"|USD|EUR|GBP|JPY|AUD|CAD|CHF|SGD|AED|SAR))"
 )
 # The same set as a TRAILING code: "19.99 USD", "500 INR".
 _CURRENCY_CODE = r"(?:INR|USD|EUR|GBP|JPY|AUD|CAD|CHF|SGD|AED|SAR)"
@@ -311,6 +323,24 @@ def format_money(amount, currency: str = "") -> str:
     return f"{mark}{amount}"
 
 
+# A figure in a promotional CONDITION is not a price and not a charge.
+#
+# "Free shipping on orders over $75" is a banner across the top of a real
+# storefront. The extractor read $75 as the page's price, and the row scanner
+# filed it as a line item -- so a shipping threshold became the basis of a
+# PROVABLE 1.0 drip-pricing finding against a shop that was offering the
+# customer something for free.
+_PROMO_THRESHOLD_RE = re.compile(
+    r"free\s+(shipping|delivery|returns?)"
+    r"|orders?\s+(over|above|of)\b"
+    r"|spend\s+(over|above)\b"
+    r"|save\s+up\s+to\b"
+    r"|minimum\s+(order|purchase|spend)\b"
+    r"|on\s+orders?\s+above\b",
+    re.IGNORECASE,
+)
+
+
 def _money_from_lines(lines, prefer_total: bool):
     """Scan rendered lines for a price.
 
@@ -318,13 +348,14 @@ def _money_from_lines(lines, prefer_total: bool):
     to the word "total", not the first rupee sign on the page -- which is
     usually the base fare or the first line item.
     """
+    usable = [line for line in lines if not _PROMO_THRESHOLD_RE.search(line or "")]
     if prefer_total:
-        for line in lines:
+        for line in usable:
             if _TOTAL_WORDS.search(line):
                 amount = parse_money(line)
                 if amount:
                     return amount
-    for line in lines:
+    for line in usable:
         amount = parse_money(line)
         if amount:
             return amount
@@ -346,7 +377,8 @@ _ROW_TEXT_JS = """
   // Kept in step with _CURRENCY on the Python side. When this knew only
   // rupees, a dollar-priced storefront yielded no rows at all and the audit
   // reported "no price could be read" on a perfectly readable page.
-  const CUR = "(?:\\u20b9|Rs\\\\.?|INR|US\\\\$|A\\\\$|C\\\\$|S\\\\$|\\\\$|\\u20ac|\\u00a3|\\u00a5|USD|EUR|GBP|JPY|AUD|CAD|CHF|SGD|AED|SAR)";
+  const CUR = "(?:\\u20b9|\\u20ac|\\u00a3|\\u00a5|\\\\$"
+    + "|(?<![A-Za-z])(?:Rs\\\\.?|INR|USD|EUR|GBP|JPY|AUD|CAD|CHF|SGD|AED|SAR))";
   const money = new RegExp(CUR + "\\\\s*[\\\\d,]|\\\\d[\\\\d,\\\\s]*\\\\/-", "i");
   // A discount badge is removed FIRST, before the money strip, and this
   // order is the whole point. Adjacent inline spans render with no
@@ -422,6 +454,9 @@ def _line_items_from_text(lines):
     for line in lines:
         amount = parse_money(line)
         if amount is None:
+            continue
+        # "Free shipping on orders over $75" is a promise, not a charge.
+        if _PROMO_THRESHOLD_RE.search(line):
             continue
         # Same order as the browser-side rule, and for the same reason: a
         # "67% off" badge butted against a struck-through price leaves the

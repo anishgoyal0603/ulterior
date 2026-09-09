@@ -12,7 +12,7 @@ import re
 from .taxonomy import BY_CODE, PROVABLE, CORROBORATED, INDICATIVE, clamp_confidence
 from .vocab import is_recurring_label
 from capture.funnel_walker import FunnelTrace
-from capture.state_extractor import PageState, format_money
+from capture.state_extractor import PageState, format_money, parse_money
 
 
 @dataclass
@@ -45,6 +45,60 @@ def _mentions_amount(text: str, amount: float) -> bool:
 # breakdown. Above this, the "itemisation" is a product catalogue.
 _MAX_BREAKDOWN_ROWS = 12
 
+# The word a page uses when it is telling you what you will pay.
+_STATES_A_TOTAL = re.compile(
+    r"\b(total|subtotal|sub-total|amount payable|grand total|order total|"
+    r"you pay|payable|order summary|amount to pay)\b", re.IGNORECASE)
+
+
+def _stated_total(state: "PageState") -> Optional[float]:
+    """The figure the page itself puts next to the word "total".
+
+    This is the number the shop tells the shopper they will pay, and it is the
+    only honest basis for a drip-pricing comparison. Everything else -- the
+    first price on the page, the sum of whatever rows a scanner found -- is
+    the crawler's inference, and inferences are what produced a PROVABLE
+    accusation built from a shipping banner and a product shelf.
+    """
+    for line in (state.full_text or "").splitlines():
+        if _STATES_A_TOTAL.search(line):
+            amount = parse_money(line)
+            if amount:
+                return amount
+    return None
+
+
+def _is_an_order_breakdown(first: "PageState", last: "PageState") -> bool:
+    """Is the final step's itemisation this order's costs, or the shop's shelf?
+
+    This is the guard that decides whether DP-08 -- a PROVABLE, 1.0-confidence,
+    publicly-named accusation -- may use a summed list of rows as "the total".
+    Getting it wrong in the permissive direction is the single most damaging
+    thing this codebase can do, and it did it: pointed at a React storefront,
+    the crawler read the HOME PAGE product grid at both steps, summed nine
+    products on the shelf to $324.98, compared that against a "free shipping
+    over $75" banner it had mistaken for the price, and reported the shop for
+    concealing $249.98 in charges. Every number in that sentence was furniture.
+
+    Three conditions, all necessary:
+
+      1. The page says what the total IS. A checkout states "Total"; a product
+         grid never does. This is the strongest signal and the cheapest.
+      2. Few enough rows to be one order's costs, not a catalogue.
+      3. The rows are not the same rows the FIRST page showed. Identical
+         itemisation across two steps means nothing was added to a basket --
+         the crawler is looking at the same site furniture twice.
+    """
+    if not last.line_items or len(last.line_items) > _MAX_BREAKDOWN_ROWS:
+        return False
+    if not _STATES_A_TOTAL.search(last.full_text or ""):
+        return False
+    first_names = {(i.get("name") or "").strip().lower() for i in first.line_items}
+    last_names = {(i.get("name") or "").strip().lower() for i in last.line_items}
+    if first_names and first_names == last_names:
+        return False
+    return True
+
 
 def detect_drip_pricing(trace: FunnelTrace) -> List[Violation]:
     """Compare the earliest disclosed price to the final checkout/payment total.
@@ -56,32 +110,47 @@ def detect_drip_pricing(trace: FunnelTrace) -> List[Violation]:
         return violations
 
     first, last = priced_states[0], priced_states[-1]
-    # Prefer the itemised total if line items are present at the last step --
-    # but only when the itemisation is plausibly a breakdown OF THIS ORDER.
+
+    # Drip pricing is a claim about ONE purchase measured at two points: what
+    # you were quoted, and what you are finally asked to pay. If the last page
+    # never states a total, there is no "finally asked to pay" -- there is a
+    # number the crawler picked off a page, and comparing it to an earlier
+    # number produces a difference that means nothing.
     #
-    # A catalogue page defeats that assumption completely. Pointed at a real
-    # storefront's product listing, the row scanner returned 36 line items,
-    # one per product card, summing to many times anything a shopper would
-    # pay. Had that page been the final step, DP-08 would have compared the
-    # first price against the value of the entire catalogue and reported a
-    # shop, at PROVABLE 1.0, for concealing charges that were other products
-    # on the shelf.
+    # Without this, a product grid whose first price happened to exceed the
+    # entry price was reported as concealed charges. The guard on the ITEMISED
+    # sum was not enough, because the bogus figure can be the page's own price
+    # rather than the sum of its rows. A checkout states a total; a shelf does
+    # not, and the detector has no business speaking about a shelf.
+    if not _STATES_A_TOTAL.search(last.full_text or ""):
+        return violations
+    # Order of trust: what the page SAYS the total is, then a plausible
+    # itemisation, then the page's own price.
     #
-    # The discriminator is ROW COUNT, and the first attempt at this got it
-    # wrong in a way the compliant corpus caught immediately: comparing the
-    # itemised sum against the page's own price and rejecting the itemisation
-    # when it overshoots silences DP-08 completely, because a drip-priced
-    # checkout is PRECISELY the case where the components exceed the headline
-    # figure. The guard would have removed the detector it was protecting.
+    # Both weaker sources have already produced false accusations. A real
+    # listing page yielded 36 line items -- one per product on the shelf --
+    # which summed to many times anything a shopper would pay; and a React
+    # storefront's home grid summed to $324.98 against a "free shipping over
+    # $75" banner mistaken for the price. The page's stated total is the one
+    # figure the shop itself asserts, so it comes first.
     #
-    # An order's fee breakdown is a handful of rows. A catalogue is dozens.
-    # Falling back to the page's stated price costs at most a missed finding;
-    # trusting a catalogue costs a public accusation at the highest tier, so
-    # the asymmetry decides which way to lean.
+    # Two earlier attempts at this guard were wrong, and both were caught by
+    # fixtures rather than by reasoning:
+    #
+    #   * rejecting an itemisation that overshoots the page's price silenced
+    #     DP-08 entirely -- a drip-priced checkout is PRECISELY where the
+    #     components exceed the headline figure, so the guard would have
+    #     removed the detector it was protecting (compliant corpus caught it);
+    #   * rejecting an itemisation identical to the previous step's assumed a
+    #     fresh DOM per page. In a single-page app the DOM persists, so
+    #     identical rows are normal, and the rule silenced a real finding
+    #     (the SPA fixture caught it).
     itemised = sum(li["price"] for li in last.line_items) if last.line_items else None
-    final_total = last.price
-    if itemised is not None and len(last.line_items) <= _MAX_BREAKDOWN_ROWS:
-        final_total = itemised
+    final_total = _stated_total(last)
+    if final_total is None:
+        final_total = last.price
+        if itemised is not None and _is_an_order_breakdown(first, last):
+            final_total = itemised
 
     if final_total and first.price and final_total > first.price * 1.02:  # >2% tolerance for rounding
         hidden = round(final_total - first.price, 2)

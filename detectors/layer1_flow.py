@@ -101,6 +101,27 @@ CANCEL_ROUTE_TERMS = [
 
 # --- DP-04 Forced Action --------------------------------------------------
 
+# What an overlay has to be ASKING for before "you cannot get past it" is a
+# forced action rather than an advert in the way.
+_OVERLAY_DEMAND = [
+    r"\bsign\s?up\b", r"\bcreate (an )?account\b", r"\bregister\b", r"\blog ?in\b",
+    r"\bsubscribe\b", r"\benter your\b", r"\byour email\b", r"\bemail address\b",
+    r"\bphone number\b", r"\bagree\b", r"\baccept\b", r"\ballow\b", r"\bconsent\b",
+    r"\bcontinue to\b", r"\bverify\b", r"\bcomplete your\b", r"\bunlock\b",
+    r"\bto continue\b", r"\bmust\b", r"\brequired\b",
+]
+
+
+def _demands_something(modal) -> bool:
+    """Does this overlay ask the user for anything?
+
+    Read from the overlay's own visible words. A form asking for an email, a
+    consent to accept, an account to create -- those are demands. A block of
+    marketing copy, or an ad frame, is not.
+    """
+    return bool(_matches_any(getattr(modal, "text", "") or "", _OVERLAY_DEMAND))
+
+
 def detect_forced_action(trace: FunnelTrace) -> List[Violation]:
     """
     DP-04: the user cannot complete their actual task without doing something
@@ -171,6 +192,20 @@ def detect_forced_action(trace: FunnelTrace) -> List[Violation]:
                 continue
             if modal.viewport_coverage < 0.10:
                 continue  # a small toast is an annoyance, not a forced action
+            # DP-04 is FORCED ACTION: the user is made to do something
+            # unrelated to their task. If the overlay demands nothing -- no
+            # field to fill, no consent to give, no account to make -- then
+            # nothing is being forced, whatever it is covering. An advert or a
+            # stray full-viewport container is not a forced action; at most it
+            # is an annoyance, and DP-10 is where annoyance belongs.
+            #
+            # This ran twice against a real automation sandbox and reported it
+            # both times at CORROBORATED 0.75. Requiring the overlay to make a
+            # demand is not a softening of the rule -- it is the rule. The
+            # pattern is named for the action the user is forced into, and the
+            # detector was not checking that one existed.
+            if not _demands_something(modal):
+                continue
             if getattr(modal, "contents_unreadable", False):
                 # The overlay's content is in an iframe -- an ad, a consent
                 # vendor, an embedded widget -- and a crawler cannot read into

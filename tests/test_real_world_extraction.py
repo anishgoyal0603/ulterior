@@ -383,6 +383,118 @@ def test_a_newsletter_footer_is_not_a_subscription_with_no_way_out(tmp_path):
     assert "DP-05" not in codes, f"a newsletter was read as a subscription trap: {codes}"
 
 
+# --- The worst finding this project has produced --------------------------
+#
+# Second sandbox run, a React storefront:
+#
+#   DP-08 [provable] conf=1.0
+#   Price disclosed at 'entry' was $75.0, but the final total at 'cart' is
+#   $324.98 -- $249.98 in charges were not shown upfront.
+#
+# Every number was furniture. The $75 was a "Free shipping on orders over $75"
+# banner. The $324.98 was nine products on the HOME PAGE shelf, summed. The
+# "cart" was the same grid again -- the crawler had clicked a control reading
+# "0 items in cart". An empty basket, at the project's highest confidence
+# tier, published against a named company.
+
+SHELF = """<!doctype html><meta charset="utf-8"><body>
+  <p>Free shipping on orders over $75</p>
+  <div><span>Plimsolls</span><span>$55.00</span></div>
+  <div><span>Dash Force</span><span>$90.00</span></div>
+  <div><span>Dark Polygon Tee</span><span>$45.00</span></div>
+  <div><span>Mighty Mug</span><span>$11.99</span></div>
+  </body>"""
+
+
+def _two_step_trace(html_first, html_last, tmp_path):
+    first = tmp_path / "first.html"
+    last = tmp_path / "last.html"
+    first.write_text(html_first, encoding="utf-8")
+    last.write_text(html_last, encoding="utf-8")
+    adapter = SiteAdapter(
+        site_name="storefront",
+        funnel_steps=[
+            FunnelStep(name="entry", url="file://" + str(first.resolve())),
+            FunnelStep(name="cart", url="file://" + str(last.resolve())),
+        ],
+    )
+    return walk_funnel(adapter, screenshot_dir=str(tmp_path / "shots"))
+
+
+def test_a_shipping_offer_is_not_the_price_of_anything(tmp_path):
+    """"Free shipping on orders over $75" is a shop giving something away.
+    Read as the page's price, it became the baseline that a later "total" was
+    measured against."""
+    state = _states_for(SHELF, tmp_path)[0]
+    assert state.price != 75.0, (
+        "the free-shipping threshold was read as the product price"
+    )
+    names = " ".join(i["name"].lower() for i in state.line_items)
+    assert "shipping" not in names, f"the offer became a line item: {state.line_items}"
+
+
+def test_the_same_shelf_seen_twice_is_not_a_basket(tmp_path):
+    """The crawler clicked "0 items in cart, view bag" and got the same grid.
+    Identical itemisation at two steps means nothing was added to anything."""
+    trace = _two_step_trace(SHELF, SHELF, tmp_path)
+    codes = [v.pattern_code for v in audit(trace)]
+    assert "DP-08" not in codes, (
+        f"an empty cart was reported for concealing charges: {codes}"
+    )
+
+
+def test_a_page_that_never_states_a_total_cannot_have_one_summed_for_it(tmp_path):
+    """A checkout says "Total". A product grid does not. Summing rows on a
+    page that states no total is inventing a figure and then attributing it
+    to the shop."""
+    trace = _two_step_trace(
+        '<!doctype html><meta charset="utf-8"><body><p>Tee $30.00</p></body>',
+        SHELF, tmp_path)
+    codes = [v.pattern_code for v in audit(trace)]
+    assert "DP-08" not in codes, f"a total was invented for a shelf: {codes}"
+
+
+def test_an_overlay_that_asks_for_nothing_is_not_a_forced_action(tmp_path):
+    """DP-04 is named for the action a user is forced INTO. The detector was
+    never checking that one existed, so a full-viewport overlay demanding
+    nothing was reported as leaving 'compliance as the only way forward' --
+    twice, against the same real site."""
+    page = tmp_path / "overlay.html"
+    page.write_text(
+        '<!doctype html><meta charset="utf-8"><body><p>Tee $30.00</p>'
+        '<div role="dialog" style="position:fixed;top:0;left:0;width:1280px;'
+        'height:900px;z-index:99"><p>Our biggest sale of the year</p></div></body>',
+        encoding="utf-8")
+    adapter = SiteAdapter(
+        site_name="shop with a promo overlay",
+        funnel_steps=[FunnelStep(name="entry", url="file://" + str(page.resolve()))],
+    )
+    trace = walk_funnel(adapter, screenshot_dir=str(tmp_path / "shots"))
+    codes = [v.pattern_code for v in audit(trace)]
+    assert "DP-04" not in codes, f"an advert was called a forced action: {codes}"
+
+
+def test_an_overlay_that_does_demand_something_still_fires(tmp_path):
+    """The other half of the measurement. Narrowing DP-04 must not mute it:
+    an inescapable overlay demanding an email address is the real pattern."""
+    page = tmp_path / "gate.html"
+    page.write_text(
+        '<!doctype html><meta charset="utf-8"><body><p>Tee $30.00</p>'
+        '<div role="dialog" style="position:fixed;top:0;left:0;width:1280px;'
+        'height:900px;z-index:99"><p>Enter your email address to continue</p>'
+        '<input type="email"></div></body>',
+        encoding="utf-8")
+    adapter = SiteAdapter(
+        site_name="shop with an email wall",
+        funnel_steps=[FunnelStep(name="entry", url="file://" + str(page.resolve()))],
+    )
+    trace = walk_funnel(adapter, screenshot_dir=str(tmp_path / "shots"))
+    codes = [v.pattern_code for v in audit(trace)]
+    assert "DP-04" in codes, (
+        f"DP-04 was narrowed into silence -- a real email wall no longer fires: {codes}"
+    )
+
+
 # --- The capability, proven on a deceptive page ---------------------------
 
 def test_drip_pricing_is_caught_with_no_machine_readable_data(tmp_path):
@@ -412,3 +524,15 @@ def test_drip_pricing_is_caught_with_no_machine_readable_data(tmp_path):
         "That is the state the tool was in for every real website."
     )
     assert "DP-02" in codes, f"basket sneaking went undetected: {sorted(codes)}"
+
+
+def test_a_currency_code_inside_an_ordinary_word_is_not_money():
+    """"Rs" is a rupee sign and it is also the middle of English words. The
+    product "SNEAKERS Plimsolls" came back as the line item "SNEAKE
+    Plimsolls" -- the RS stripped as currency. The same flaw would have made
+    "SNEAKERS 55" parse as fifty-five rupees, which is a wrong NUMBER rather
+    than a cosmetic blemish."""
+    from capture.state_extractor import _line_items_from_text
+    items = _line_items_from_text(["SNEAKERS Plimsolls $55.00"])
+    assert items and items[0]["name"] == "SNEAKERS Plimsolls", items
+    assert parse_money("SNEAKERS 55") is None
