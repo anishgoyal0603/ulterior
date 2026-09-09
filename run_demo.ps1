@@ -159,6 +159,16 @@ $PipNet = @("--timeout", "120", "--retries", "10")
 
 Invoke-Step "Upgrading pip" { & $VPy -m pip install --quiet @PipNet --upgrade pip }
 Invoke-Step "Installing dependencies (a few minutes the first time)" { & $VPy -m pip install --quiet @PipNet -r requirements.txt }
+# requirements-dev.txt too, even though this script only runs the demo.
+#
+# Without it, tests/test_report_language.py -- six tests that read the
+# generated PDF back and assert on its wording -- SKIPS silently, because it
+# needs pdfminer to read the PDF. CI installs it, so CI ran those six and a
+# collaborator's laptop did not: the suite reported all green while quietly
+# running less of itself. The report's wording is the most defamation-
+# sensitive text this project produces, so those are the last six tests that
+# should vanish without saying so. It is a small pure-Python package.
+Invoke-Step "Installing the test-only dependencies" { & $VPy -m pip install --quiet @PipNet -r requirements-dev.txt }
 Invoke-Step "Installing the Chromium build Playwright expects" { & $VPy -m playwright install chromium }
 
 Write-Host ""

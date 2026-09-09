@@ -62,6 +62,10 @@ echo "==> Installing dependencies"
 PIP_NET_FLAGS="--timeout 120 --retries 10"
 ./.venv/bin/pip install -q $PIP_NET_FLAGS --upgrade pip
 ./.venv/bin/pip install -q $PIP_NET_FLAGS -r requirements.txt
+# requirements-dev.txt too. Without it tests/test_report_language.py skips
+# silently -- six tests that assert what the generated PDF actually SAYS --
+# so the suite reports green while running less of itself than CI does.
+./.venv/bin/pip install -q $PIP_NET_FLAGS -r requirements-dev.txt
 
 echo "==> Installing the Chromium build Playwright expects"
 # Playwright pins an exact browser revision per version. Installing the

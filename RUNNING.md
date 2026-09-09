@@ -191,6 +191,18 @@ Stop the server first (**Ctrl+C**), then:
 .\.venv\Scripts\python.exe -m pytest tests\ -q -m "not ui"
 ```
 
+Expect **248 passed**. If it says anything about tests being *skipped*, the
+test-only dependencies are missing — `run_demo.ps1` installs them, but if you
+set the virtual environment up by hand, add:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+```
+
+That one package (`pdfminer.six`) is what lets six tests read the generated PDF
+back and check what it actually says. A skipped test is not a passing test, and
+those six guard the wording of a report that names a company.
+
 That is the fast set (~1 minute). The full set adds browser tests that start a
 real server and click every control, and takes about four minutes:
 

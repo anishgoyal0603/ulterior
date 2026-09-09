@@ -32,19 +32,38 @@ _EVICT_EVERY_SECONDS = 60
 
 
 class SlidingWindowLimiter:
-    def __init__(self):
+    """A per-key sliding window.
+
+    `clock` is injectable so the expiry behaviour can be tested by advancing
+    time deliberately instead of by sleeping. That is not a convenience: the
+    old test asserted that a hit falls out of a zero-width window, which is
+    only observable if the clock ticks between two back-to-back calls. It does
+    on Linux, and it does NOT on Windows, where `time.monotonic()` advances in
+    steps of about 15.6 ms and returns the identical float for both calls. The
+    test passed here and failed on the user's laptop -- a real defect in the
+    test, dressed up as a bug in the code.
+    """
+
+    def __init__(self, clock=time.monotonic):
         self._hits = defaultdict(deque)
         self._lock = Lock()
         self._last_evict = 0.0
+        self._clock = clock
 
     def check(self, key: str, limit: int, window_seconds: int) -> bool:
         """Return True if the request is allowed, False if rate limited."""
-        now = time.monotonic()
+        now = self._clock()
         cutoff = now - window_seconds
         with self._lock:
             self._evict_idle(now)
             bucket = self._hits[key]
-            while bucket and bucket[0] < cutoff:
+            # `<=`, not `<`. A hit sitting exactly on the cutoff is outside the
+            # window by definition -- and with a coarse clock, "exactly on the
+            # cutoff" is where a zero-width window puts every hit, so the
+            # boundary decides the behaviour rather than being a rounding
+            # detail. At a real 60-second window the two differ only for a hit
+            # aged 60.000000s, which no caller can distinguish.
+            while bucket and bucket[0] <= cutoff:
                 bucket.popleft()
             if len(bucket) >= limit:
                 return False

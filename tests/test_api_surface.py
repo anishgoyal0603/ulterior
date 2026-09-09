@@ -313,6 +313,27 @@ def test_launchers_ask_for_supported_python_versions_by_name():
     assert "python3.12 python3.13 python3.11 python3.10" in sh
 
 
+def test_the_setup_path_installs_the_test_only_dependencies_too():
+    """CI installs requirements-dev.txt and the launchers did not.
+
+    The consequence was invisible and worth naming: tests/test_report_language.py
+    begins with an importorskip for pdfminer, which is only in
+    requirements-dev.txt. On a laptop set up by the launcher that module --
+    SIX tests asserting what the generated PDF actually says -- skipped
+    silently. The suite printed green while running less of itself than CI
+    did, and the wording of a report that names a company is the last thing
+    that should be checked only on a server nobody looks at.
+    """
+    root = Path(__file__).parent.parent
+    for launcher in ("run_demo.ps1", "run_demo.sh"):
+        assert "requirements-dev.txt" in (root / launcher).read_text(), (
+            f"{launcher} does not install requirements-dev.txt, so the report-"
+            f"wording tests will skip on every machine set up with it"
+        )
+    ci = (root / ".github" / "workflows" / "ci.yml").read_text()
+    assert "requirements-dev.txt" in ci, "CI stopped installing the test deps"
+
+
 def test_launchers_give_pip_enough_time_on_a_slow_connection():
     """pip's default 15-second socket timeout is not enough for the Playwright
     wheel on a slow link -- it dies with ReadTimeoutError halfway through, which

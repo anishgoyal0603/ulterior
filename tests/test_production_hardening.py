@@ -95,11 +95,65 @@ def test_rate_limit_response_has_retry_after(client):
     assert r.headers["Retry-After"]
 
 
-def test_sliding_window_expires():
-    lim = SlidingWindowLimiter()
+class _FakeClock:
+    """A clock that only moves when the test says so.
+
+    The version of these tests that used the real clock passed on Linux and
+    FAILED on Windows: `time.monotonic()` there advances in ~15.6 ms steps, so
+    two back-to-back calls return the identical float and nothing had "aged"
+    between them. A limiter test whose result depends on how fast the host's
+    timer ticks is not testing the limiter.
+    """
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += seconds
+
+
+def test_a_zero_width_window_never_blocks():
+    """Nothing can be inside a window of zero length, so every hit is allowed.
+    This is the boundary case, and it is asserted with a frozen clock so it
+    means the same thing on every platform."""
+    clock = _FakeClock()
+    lim = SlidingWindowLimiter(clock=clock)
     assert lim.check("k", limit=1, window_seconds=0) is True
-    # zero-width window means the previous hit is already outside it
     assert lim.check("k", limit=1, window_seconds=0) is True
+
+
+def test_a_hit_inside_the_window_is_blocked():
+    clock = _FakeClock()
+    lim = SlidingWindowLimiter(clock=clock)
+    assert lim.check("k", limit=1, window_seconds=60) is True
+    clock.advance(59)
+    assert lim.check("k", limit=1, window_seconds=60) is False, (
+        "a second request 59 seconds into a 60-second window must be refused"
+    )
+
+
+def test_the_window_actually_expires_once_time_passes():
+    """The behaviour the old test was reaching for, now actually exercised:
+    the limiter must FORGET a hit, not merely refuse a fast second one."""
+    clock = _FakeClock()
+    lim = SlidingWindowLimiter(clock=clock)
+    assert lim.check("k", limit=1, window_seconds=60) is True
+    clock.advance(61)
+    assert lim.check("k", limit=1, window_seconds=60) is True, (
+        "the first hit is older than the window and must no longer count"
+    )
+
+
+def test_keys_do_not_share_a_budget():
+    """One noisy client must not rate-limit everybody else."""
+    clock = _FakeClock()
+    lim = SlidingWindowLimiter(clock=clock)
+    assert lim.check("client-a", limit=1, window_seconds=60) is True
+    assert lim.check("client-a", limit=1, window_seconds=60) is False
+    assert lim.check("client-b", limit=1, window_seconds=60) is True
 
 
 # --- Check 1: config fail-fast ----------------------------------------------
