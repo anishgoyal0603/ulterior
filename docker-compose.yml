@@ -1,0 +1,84 @@
+# Production stack. The code in this repo currently uses SQLite + an
+# in-process ThreadPoolExecutor (see app/tasks.py) so it's runnable and
+# testable with zero infra. This compose file is the documented upgrade
+# path: swap SQLite -> Postgres and the thread pool -> Celery+Redis for
+# horizontal scaling and job durability across API restarts. The interface
+# in app/tasks.py (submit_audit_job) is written so this swap only touches
+# that one file.
+
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-darkpattern_auditor}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # SECURITY: no `ports:` mapping. Postgres is reachable only over the
+    # internal compose network by the api/worker services. Publishing
+    # 5432 to the host exposes the database to anything that can reach
+    # this machine. For local inspection use:
+    #   docker compose exec postgres psql -U $POSTGRES_USER
+    expose: ["5432"]
+    # Require TLS for all connections and scram-sha-256 (not md5) for auth.
+    command: >
+      postgres
+      -c ssl=on
+      -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem
+      -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key
+      -c password_encryption=scram-sha-256
+
+  redis:
+    image: redis:7-alpine
+    # SECURITY: not published to the host either. Redis has no auth by
+    # default -- an exposed 6379 is a well-known trivial compromise path.
+    expose: ["6379"]
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}"]
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DEBUG: "false"
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set in .env}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set in .env}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:?CORS_ALLOW_ORIGINS must be set in .env}
+      API_KEYS: ${API_KEYS:?API_KEYS must be set in .env — the app refuses to run unauthenticated}
+      ADMIN_API_KEYS: ${ADMIN_API_KEYS:-}
+      RETENTION_DAYS: ${RETENTION_DAYS:-30}
+      MAX_STORED_AUDITS: ${MAX_STORED_AUDITS:-500}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on: [postgres, redis]
+    # Bind to loopback only: terminate TLS at a reverse proxy (nginx/Caddy/
+    # a cloud load balancer) in front of this, rather than exposing the app
+    # server directly to the internet over plain HTTP.
+    ports: ["127.0.0.1:8000:8000"]
+    volumes:
+      - evidence:/tmp/dp_evidence
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.celery_worker worker --loglevel=info --concurrency=4
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DEBUG: "false"
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set in .env}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set in .env}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:?CORS_ALLOW_ORIGINS must be set in .env}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on: [postgres, redis]
+    volumes:
+      - evidence:/tmp/dp_evidence
+
+volumes:
+  pgdata:
+  evidence:

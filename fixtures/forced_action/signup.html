@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html><head><title>TravelGo — Complete your booking</title></head>
+<body>
+<h1>Complete your booking</h1>
+
+<!--
+  DP-04 fixture. Two distinct forced-action shapes on one page, so a single
+  browser capture exercises both detections:
+
+    (a) a REQUIRED checkbox demanding marketing/third-party consent. The
+        `required` attribute is the operative fact: the page itself declares
+        that the booking cannot proceed without it.
+    (b) a blocking interstitial covering most of the viewport with no
+        dismissal control of any kind.
+
+  The address and card fields are also `required`, and are the deliberate
+  false-positive guard: they are genuinely necessary to fulfil a booking and
+  must NOT be flagged. A detector that cannot tell "we need your address to
+  deliver" from "you must accept marketing to continue" is useless.
+-->
+
+<form id="booking">
+  <label for="fullname">Full name</label>
+  <input type="text" id="fullname" name="fullname" required>
+
+  <label for="address">Delivery address</label>
+  <input type="text" id="address" name="address" required>
+
+  <label for="card">Card number</label>
+  <input type="text" id="card" name="card" required>
+
+  <div class="consent-row">
+    <input type="checkbox" id="marketing-consent" name="marketing-consent" required>
+    <label for="marketing-consent">
+      I agree to receive marketing communications and to share my data with third-party partners
+    </label>
+  </div>
+
+  <div class="consent-row">
+    <input type="checkbox" id="terms" name="terms" required>
+    <label for="terms">I accept the Terms of Service and Privacy Policy</label>
+  </div>
+
+  <button type="submit">Confirm booking</button>
+</form>
+
+<div id="invite-wall" class="modal"
+     style="position:fixed; top:0; left:0; width:100%; height:100%;
+            background:#1a1a2e; color:#fff; z-index:9999; padding:40px;">
+  <h2>Invite 3 friends to continue</h2>
+  <p>Share TravelGo with three contacts to unlock your booking.</p>
+  <button id="share-now" style="font-size:20px;padding:14px 30px;">Share with my contacts</button>
+</div>
+
+</body></html>

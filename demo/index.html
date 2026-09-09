@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ulterior — live dark pattern audit</title>
+<link rel="stylesheet" href="demo.css">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-in">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <div>
+        <h1>Ulterior</h1>
+        <p class="sub">Live dark pattern audit · India's Guidelines for Prevention and
+          Regulation of Dark Patterns, 2023 · 13 categories</p>
+      </div>
+    </div>
+    <!--
+      The disclaimer is in the masthead, not a footnote. This page is the first
+      thing a stranger sees, and the difference between "exhibits a pattern
+      matching a definition" and "this shop is breaking the law" is the whole
+      legal posture of the project. Burying it would undo that in one screen.
+    -->
+    <p class="law">
+      <strong>Observation tool, not a legal determination.</strong>
+      Findings describe characteristics matching the Guidelines' definitions —
+      they are not a finding that anyone has breached any law.
+    </p>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="runbar" aria-label="Run an audit">
+    <div class="runbar-row">
+      <label for="target">Storefront</label>
+      <div class="select-shell">
+        <select id="target">
+          <option value="hosted_dark_demo">ShopMart — deliberately dark-patterned</option>
+          <option value="hosted_clean_demo">HonestCart — compliant control</option>
+        </select>
+      </div>
+      <button class="primary" id="run">
+        <span class="btn-label">Run the audit</span>
+      </button>
+      <span class="status" id="status" role="status" aria-live="polite"></span>
+    </div>
+    <div class="progress" id="progress" aria-hidden="true"><span></span></div>
+    <p class="hint">A real headless Chromium walks the four checkout pages over HTTP,
+      loading the urgency pages twice to test whether the countdown actually moves.
+      Takes about 10 seconds.</p>
+  </section>
+
+  <section class="kpis" aria-label="Findings by evidence tier">
+    <div class="kpi">
+      <div class="k-label">Findings</div>
+      <div class="k-value" id="k-total">—</div>
+    </div>
+    <div class="kpi t-prov">
+      <div class="k-label">Provable</div>
+      <div class="k-value" id="k-prov">—</div>
+      <div class="k-note">arithmetic or DOM state</div>
+    </div>
+    <div class="kpi t-corr">
+      <div class="k-label">Corroborated</div>
+      <div class="k-value" id="k-corr">—</div>
+      <div class="k-note">two signals agreed</div>
+    </div>
+    <div class="kpi t-ind">
+      <div class="k-label">Indicative</div>
+      <div class="k-value" id="k-ind">—</div>
+      <div class="k-note">a human should confirm</div>
+    </div>
+  </section>
+
+  <div class="split">
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>The storefront being audited</h2>
+        <span class="panel-tag" id="frame-label">ShopMart checkout</span>
+      </div>
+      <!--
+        Browser chrome around the iframe on purpose: this is a real page being
+        walked over real HTTP, and a bare framed box reads as a mockup. The
+        address field shows the URL the crawler is actually on.
+      -->
+      <div class="browser">
+        <div class="browser-bar">
+          <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="addr" id="frame-url">127.0.0.1:8000/storefront/cart.html</span>
+        </div>
+        <iframe id="frame" src="/storefront/cart.html" title="Storefront under audit"></iframe>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>What the auditor found</h2>
+        <span class="panel-tag">with the evidence behind each one</span>
+      </div>
+      <div class="findings" id="findings">
+        <div class="empty">
+          <p>Press <strong>Run the audit</strong>.</p>
+          <p>Nothing here is pre-recorded — the browser opens the pages on the left
+             and the findings appear as they are produced.</p>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <footer class="legend">
+    <p class="legend-title">How to read a finding</p>
+    <div class="legend-grid">
+      <div class="legend-item t-prov">
+        <span class="swatch" aria-hidden="true"></span>
+        <div><strong>Provable</strong> — arithmetic or DOM state. The page either did
+          this or it didn't. Capped at 100% confidence.</div>
+      </div>
+      <div class="legend-item t-corr">
+        <span class="swatch" aria-hidden="true"></span>
+        <div><strong>Corroborated</strong> — two or more independent signals had to
+          agree. Capped at 90%.</div>
+      </div>
+      <div class="legend-item t-ind">
+        <span class="swatch" aria-hidden="true"></span>
+        <div><strong>Indicative</strong> — consistent with the pattern; a human should
+          confirm it. Capped at 60%.</div>
+      </div>
+    </div>
+    <p class="legend-foot">No detector may report more confidence than its tier allows.</p>
+  </footer>
+</main>
+
+<script src="demo.js" defer></script>
+</body>
+</html>

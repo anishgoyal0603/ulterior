@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html><head><title>FreeMoviesHub — Watch now</title></head>
+<body>
+<h1>Watch now</h1>
+
+<!--
+  DP-13 fixture. Two shapes:
+
+    (a) an interruption using operating-system / antivirus framing paired
+        with an install call to action;
+    (b) an anchor pointing at an .exe whose own text ("Watch in HD") gives
+        the user no indication that activating it downloads a program.
+
+  The honestly-labelled download below is the false-positive guard: a link
+  that says "Download installer (.exe)" is doing nothing deceptive, and
+  flagging it would make every software vendor's download page a violation.
+-->
+
+<div id="sys-alert" class="modal"
+     style="position:fixed; top:0; left:0; width:100%; height:70%;
+            background:#b00020; color:#fff; z-index:9999; padding:30px;">
+  <h2>Security alert: your device is infected</h2>
+  <p>3 threats detected. Immediate action required.</p>
+  <button id="scan">Scan now</button>
+</div>
+
+<a href="/files/player-setup.exe">Watch in HD</a>
+<a href="/files/toolsuite-installer.exe">Download installer (.exe)</a>
+</body></html>

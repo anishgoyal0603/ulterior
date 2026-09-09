@@ -1,0 +1,32 @@
+/* Shared styling for the compliant corpus. Deliberately ordinary and
+   accessible: every control is legible, decline options carry the same weight
+   as accept options, and nothing is hidden. If a detector fires on one of
+   these pages, the detector is wrong. */
+:root { --ink:#10151c; --ink-2:#48545f; --line:#e2e6ea; --brand:#0f5f57; }
+* { box-sizing:border-box; }
+body { margin:0; background:#f7f8fa; color:var(--ink); font-size:15px; line-height:1.55;
+       font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+header { background:#fff; border-bottom:1px solid var(--line); padding:14px 20px; font-weight:700; }
+main { max-width:680px; margin:0 auto; padding:20px; }
+.card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:18px 20px; }
+h1 { font-size:21px; margin:0 0 8px; }
+.price { font-size:24px; font-weight:700; margin:0 0 6px; }
+.note { color:var(--ink-2); font-size:13.5px; margin:0 0 14px; }
+.line-item { display:flex; justify-content:space-between; padding:9px 0;
+             border-bottom:1px solid var(--line); color:var(--ink-2); }
+.total { display:flex; justify-content:space-between; margin:12px 0 0; padding-top:11px;
+         border-top:2px solid var(--ink); font-size:17px; font-weight:700; }
+a.cta, button.cta { display:inline-block; background:var(--brand); color:#fff; font-size:15px;
+        font-weight:600; text-decoration:none; border:0; border-radius:8px; padding:11px 22px;
+        cursor:pointer; font-family:inherit; }
+/* Accept and decline carry the SAME weight. This is the compliant shape. */
+.choice { display:flex; gap:10px; margin:14px 0 0; }
+.choice button { font-family:inherit; font-size:15px; font-weight:600; padding:11px 22px;
+        border-radius:8px; cursor:pointer; }
+.choice .yes { background:var(--brand); color:#fff; border:1px solid var(--brand); }
+.choice .no  { background:#fff; color:var(--ink); border:1px solid #9aa6b1; }
+label { display:flex; gap:9px; align-items:center; color:var(--ink-2); font-size:14px;
+        margin:10px 0; }
+.sponsored { display:inline-block; background:#eef1f4; color:#33404b; font-size:12px;
+        font-weight:700; border-radius:4px; padding:3px 8px; margin-bottom:8px; }
+footer { max-width:680px; margin:0 auto; padding:18px 20px 40px; color:var(--ink-2); font-size:13px; }

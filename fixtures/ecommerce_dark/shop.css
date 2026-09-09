@@ -1,0 +1,304 @@
+/* =========================================================================
+   ShopMart — the deliberately dark-patterned demo storefront
+   =========================================================================
+
+   READ THIS BEFORE CHANGING ANY VALUE IN HERE.
+
+   This file styles the shop that Ulterior audits. It is EVIDENCE, not
+   decoration: detectors/layer2_geometry.py reads the computed style of these
+   controls out of a real browser and compares them. Four declarations below
+   are the thing being measured, and changing them changes what the audit
+   finds:
+
+     .btn-accept   background #ff6600, white text, 22px, 16px 40px padding
+     .btn-decline  background #f0f0f0, #ccc text, 10px, 2px 6px padding
+                   (~1.6:1 contrast — far under WCAG's 4.5:1)
+     .urgency-msg  must stay visible; DP-01 reads its text
+     .price/.total must stay visible; DP-08 does arithmetic on them
+
+   Everything else is ordinary shop styling and is free to change.
+
+   Why the shop looks modern and well-built: because real ones do. A dark
+   pattern is not a badly made page — it is a carefully made page whose care
+   is pointed at the wrong party. A demo shop that looked broken would teach
+   the wrong lesson, and would let a viewer conclude their own polished
+   checkout could not possibly have the same problems.
+
+   No webfonts: the auditing app serves these files under a CSP that permits
+   no external origin, so a font link would be blocked and the measured
+   geometry would shift under us.
+   ========================================================================= */
+
+:root {
+  --ink:      #10151c;
+  --ink-2:    #4b5765;
+  --ink-3:    #7c8998;
+  --line:     #e6eaef;
+  --bg:       #f7f8fa;
+  --surface:  #ffffff;
+  --brand:    #1f2937;
+  --sale:     #d93025;
+  --radius:   12px;
+  --ui: ui-sans-serif, -apple-system, "Segoe UI Variable Text", "Segoe UI",
+        Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--ui);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* --- Shop chrome -------------------------------------------------------- */
+
+.shop-head {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 56px;
+}
+.logo {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--brand);
+}
+.logo span { color: #ff6600; }
+.shop-nav {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--ink-3);
+  margin-left: 4px;
+}
+.cart-chip {
+  margin-left: auto;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 4px 12px;
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 22px 20px 40px;
+}
+
+/* --- Product ------------------------------------------------------------ */
+
+.product {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.shot {
+  height: 190px;
+  background:
+    radial-gradient(120% 90% at 50% 12%, #ffffff 0%, transparent 60%),
+    linear-gradient(150deg, #dfe6ef 0%, #c3cedb 55%, #aab8c8 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--line);
+}
+/* A phone-case silhouette drawn in CSS — no image file to load. */
+.shot::after {
+  content: "";
+  width: 88px;
+  height: 148px;
+  border-radius: 16px;
+  background: linear-gradient(160deg, #2b3542, #4a5766 60%, #38434f);
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.14),
+              0 10px 24px -10px rgba(16, 21, 28, 0.5);
+}
+.product-body { padding: 18px 20px 20px; }
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 640;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+.rating {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin: 0 0 12px;
+}
+.rating b { color: var(--ink-2); font-weight: 600; }
+
+.price {
+  margin: 0 0 10px;
+  font-size: 27px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.strike {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--ink-3);
+  text-decoration: line-through;
+  margin-left: 8px;
+}
+.save {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a7f4b;
+  margin-left: 6px;
+}
+
+/* DP-01 reads the text of this element. Keep it visible and readable. */
+.urgency-msg {
+  display: inline-block;
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--sale);
+  background: #fdeceb;
+  border: 1px solid #f7c9c5;
+  border-radius: 8px;
+  padding: 7px 12px;
+}
+.urgency-msg #timer { font-variant-numeric: tabular-nums; }
+
+/* --- The main call to action -------------------------------------------- */
+
+.cta {
+  display: inline-block;
+  background: #ff6600;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 620;
+  text-decoration: none;
+  border-radius: 9px;
+  padding: 12px 26px;
+  transition: background 0.15s ease;
+}
+.cta:hover { background: #e65c00; }
+
+/* --- Cart / checkout ---------------------------------------------------- */
+
+.summary {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 20px 20px;
+}
+.summary h1 { margin-bottom: 14px; }
+
+.line-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: baseline;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14.5px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.line-item:first-of-type { padding-top: 0; }
+
+/* The sneaked line holds a checkbox AND its label, which space-between pushed
+   to opposite ends of the row. Keep them together so the tick reads as
+   belonging to the charge it opts you into — which is the point of DP-02. */
+.line-item.sneaked { justify-content: flex-start; gap: 9px; }
+.line-item.sneaked input { width: 16px; height: 16px; margin: 0; flex: none; }
+
+.subtotal,
+.total {
+  display: flex;
+  justify-content: space-between;
+  margin: 14px 0 0;
+  padding-top: 13px;
+  border-top: 2px solid var(--ink);
+  font-size: 18px;
+  font-weight: 680;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- The consent widget: the interference itself ------------------------ *
+ * The two controls below are what DP-06 measures. Their contrast, size and
+ * padding are the finding. Do not "tidy" them.                            */
+
+.consent-widget {
+  margin: 18px 0 0;
+  padding: 16px;
+  background: #fff8f2;
+  border: 1px solid #ffd9bd;
+  border-radius: 10px;
+}
+.consent-widget p {
+  margin: 0 0 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+.consent-widget p strong { color: var(--ink); }
+
+.btn-accept {
+  background: #ff6600;
+  color: white;
+  font-size: 22px;
+  padding: 16px 40px;
+  border: none;
+  border-radius: 8px;
+  font-family: inherit;
+  font-weight: 620;
+  cursor: pointer;
+}
+.btn-decline {
+  background: #f0f0f0;
+  color: #ccc;
+  font-size: 10px;
+  padding: 2px 6px;
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.btn-pay {
+  margin-top: 18px;
+  background: #ff6600;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 620;
+  border: 0;
+  border-radius: 9px;
+  padding: 13px 32px;
+  cursor: pointer;
+}
+
+.next-step {
+  display: inline-block;
+  margin-top: 16px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #ffffff;
+  background: var(--brand);
+  border-radius: 9px;
+  padding: 11px 24px;
+  text-decoration: none;
+}
+.next-step:hover { background: #111826; }
+
+.trust {
+  margin: 16px 0 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}

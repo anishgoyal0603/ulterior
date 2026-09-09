@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html><head><title>SPA Shop</title>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Product","name":"Wireless Earbuds",
+ "offers":{"@type":"Offer","price":"1499","priceCurrency":"INR"}}
+</script>
+</head>
+<body>
+<h1>Wireless Earbuds</h1>
+<p class="price" data-price="1499">₹1499</p>
+<button id="add-to-cart-btn">Add to Cart</button>
+
+<!-- Cart drawer: hidden by default, no URL change when opened -->
+<div id="cart-drawer" style="display:none;">
+  <h2>Your Cart</h2>
+  <div class="line-item" data-name="Wireless Earbuds" data-price="1499">Wireless Earbuds - ₹1499</div>
+  <div class="line-item sneaked" data-name="Extended Warranty" data-price="299">
+    <input type="checkbox" id="warranty" checked> Extended Warranty - ₹299
+  </div>
+  <p class="subtotal" data-subtotal="1798" data-price="1798">Subtotal: ₹1798</p>
+  <p class="urgency-msg">Hurry! Only 2 left in stock!</p>
+</div>
+
+<script>
+document.getElementById('add-to-cart-btn').addEventListener('click', function() {
+  document.getElementById('cart-drawer').style.display = 'block';
+  document.getElementById('cart-drawer').classList.add('open');
+});
+</script>
+</body></html>

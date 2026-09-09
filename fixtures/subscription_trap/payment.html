@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html><head><title>StreamBox — Payment</title></head>
+<body>
+<h1>Payment details</h1>
+
+<!--
+  DP-05 fixture, step 2: the recurring terms finally appear, AFTER the user
+  has committed. The detector compares this against offer.html and reports
+  the disclosure as late, quoting the exact term it found here.
+-->
+
+<p>Your plan renews automatically. You will be charged ₹4,999 per year until cancelled.</p>
+<p class="small">Auto-renewal is enabled by default.</p>
+<div data-price="4999">₹4,999</div>
+<button id="pay">Pay now</button>
+</body></html>

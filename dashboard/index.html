@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Dark Pattern Auditor — SIH26199</title>
+<link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+<header>
+  <h1>Dark Pattern Auditor</h1>
+  <p>India CCPA Dark Patterns Guidelines, 2023 &middot; automated compliance auditing &middot; SIH26199</p>
+</header>
+
+<div class="wrap">
+  <div class="keyrow">
+    <label for="api-key">API key</label>
+    <input id="api-key" type="password" autocomplete="off" spellcheck="false"
+           placeholder="required in production; leave blank for local dev">
+    <button id="reload">Connect</button>
+  </div>
+
+  <!--
+    SELF-SERVE. The API has accepted a list of arbitrary URLs since the
+    beginning (schemas.AuditJobCreate.target_urls), but nothing in the UI
+    exposed it — so "paste any URL, no code required" was true of the product
+    and untrue of every screen a person could actually reach. That gap is the
+    kind that only shows up when someone asks to try it in front of you.
+
+    Deliberately on the AUTHENTICATED dashboard and NOT on the public /demo
+    page: an unauthenticated box that fetches any URL you type is a
+    crawler-for-hire, and the demo endpoint is restricted to two
+    server-defined storefronts precisely to avoid becoming one. Every URL
+    here still passes through app/ssrf_guard.py before the browser opens it.
+  -->
+  <div class="controls">
+    <input class="u1" id="target-urls" type="text"
+           placeholder="Audit any site - paste a product or cart URL (https://...)">
+    <button class="primary" id="run-urls">Audit this site</button>
+  </div>
+
+  <div class="controls u2">
+    <label class="u3">
+      <input type="checkbox" id="auto-discover" checked>
+      <strong>Find the checkout by itself</strong>
+    </label>
+    <span class="u4">
+      On: give one URL and the crawler clicks its own way to the cart and checkout.
+      Off: paste every step yourself, comma separated.
+      It will never click Pay, Place Order, Subscribe or Sign in.
+    </span>
+  </div>
+
+  <div class="controls">
+    <span class="u5">or a registered site</span>
+    <select id="adapter-select"></select>
+    <button class="primary" id="run-audit">Run Audit</button>
+    <label class="u3">
+      <input type="checkbox" id="use-llm"> LLM language pass
+    </label>
+    <span id="run-status"></span>
+  </div>
+
+  <!-- Coverage is fetched from /coverage, which is generated from
+       detectors/taxonomy.py. The dashboard, the API and the pitch therefore
+       quote the same numbers from the same source, and a coverage claim
+       cannot drift out of sync with the code that backs it. -->
+  <div class="card u6">
+    <h2>CCPA-13 coverage &amp; evidence tiers</h2>
+    <div class="u7" id="coverage-body">Loading…</div>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="label">Sites audited</div><div class="value" id="kpi-audits">—</div></div>
+    <div class="kpi"><div class="label">Violations found</div><div class="value" id="kpi-violations">—</div></div>
+    <div class="kpi u8"><div class="label">Most common pattern</div><div class="value" id="kpi-top">—</div></div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Violations by CCPA pattern</h2>
+      <div id="chart-legend" class="legend"></div>
+      <svg id="patternChart" role="img" aria-label="Violations by CCPA pattern, coloured by evidence tier"></svg>
+      <div id="chart-tip" class="tip" hidden></div>
+    </div>
+    <div class="card">
+      <h2>Recent audits</h2>
+      <table>
+        <thead><tr><th>Site</th><th>Status</th><th>Violations</th></tr></thead>
+        <tbody id="jobs-table"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Latest audit — evidence-linked violations</h2>
+      <!-- How the crawl went. Hidden unless discovery ran. -->
+      <div id="discovery-report" class="u9" hidden></div>
+    <table>
+      <thead><tr><th>Pattern</th><th>Step</th><th>Layer</th><th>Confidence</th><th>Explanation</th></tr></thead>
+      <tbody id="violations-table"></tbody>
+    </table>
+  </div>
+</div>
+
+<script src="dashboard.js" defer></script>
+</body>
+</html>

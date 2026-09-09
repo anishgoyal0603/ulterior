@@ -1,0 +1,164 @@
+/* =========================================================================
+   HonestCart — the compliant control storefront
+   =========================================================================
+
+   Deliberately built to the SAME visual standard as the dark ShopMart
+   fixture. That is the point of a control: if the compliant shop looked
+   plainer, a viewer could conclude that dark patterns are what a shop does
+   when it wants to look good, and that complying means looking worse. Both
+   shops here are well made. Only one of them is honest.
+
+   What makes this one compliant, and what the auditor should therefore find
+   nothing about:
+
+     * the price shown first is the price charged last (no drip pricing)
+     * the insurance box is UNTICKED and opt-in (no basket sneaking)
+     * accept and decline carry equal visual weight (no interference)
+     * stock is stated as a fact, not a countdown (no false urgency)
+     * declining is worded neutrally (no confirm shaming)
+
+   No webfonts: served under a CSP that permits no external origin.
+   ========================================================================= */
+
+:root {
+  --ink:      #10151c;
+  --ink-2:    #4b5765;
+  --ink-3:    #7c8998;
+  --line:     #e6eaef;
+  --bg:       #f7f8fa;
+  --surface:  #ffffff;
+  --brand:    #10504a;
+  --radius:   12px;
+  --ui: ui-sans-serif, -apple-system, "Segoe UI Variable Text", "Segoe UI",
+        Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--ui);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+.shop-head {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 56px;
+}
+.logo { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; color: var(--brand); }
+.shop-nav { display: flex; gap: 16px; font-size: 13px; color: var(--ink-3); }
+.cart-chip {
+  margin-left: auto;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 4px 12px;
+}
+
+main { max-width: 720px; margin: 0 auto; padding: 22px 20px 40px; }
+
+.product, .summary {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.product { overflow: hidden; }
+.summary { padding: 18px 20px 20px; }
+
+.shot {
+  height: 190px;
+  background:
+    radial-gradient(120% 90% at 50% 12%, #ffffff 0%, transparent 60%),
+    linear-gradient(150deg, #dfe6ef 0%, #c3cedb 55%, #aab8c8 100%);
+  display: flex; align-items: center; justify-content: center;
+  border-bottom: 1px solid var(--line);
+}
+.shot::after {
+  content: "";
+  width: 88px; height: 148px; border-radius: 16px;
+  background: linear-gradient(160deg, #2b3542, #4a5766 60%, #38434f);
+  box-shadow: inset 0 0 0 3px rgba(255,255,255,0.14),
+              0 10px 24px -10px rgba(16,21,28,0.5);
+}
+.product-body { padding: 18px 20px 20px; }
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 22px; font-weight: 640; letter-spacing: -0.02em; line-height: 1.25;
+}
+.rating { font-size: 12.5px; color: var(--ink-3); margin: 0 0 12px; }
+.rating b { color: var(--ink-2); font-weight: 600; }
+
+.price {
+  margin: 0 0 6px;
+  font-size: 27px; font-weight: 680; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.price .incl { font-size: 13px; font-weight: 500; color: var(--ink-2); margin-left: 8px; }
+
+/* Stated as a fact, in ordinary type. Not a countdown, not a colour alarm. */
+.stock-msg { margin: 0 0 16px; font-size: 13.5px; color: var(--ink-2); }
+
+.cta, .next-step {
+  display: inline-block;
+  background: var(--brand);
+  color: #ffffff;
+  font-size: 16px; font-weight: 620;
+  text-decoration: none;
+  border-radius: 9px;
+  padding: 12px 26px;
+  transition: background 0.15s ease;
+}
+.cta:hover, .next-step:hover { background: #0b3d38; }
+.next-step { margin-top: 16px; }
+
+.line-item {
+  display: flex; justify-content: space-between; gap: 16px; align-items: baseline;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14.5px; color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.line-item:first-of-type { padding-top: 0; }
+
+.subtotal, .total {
+  display: flex; justify-content: space-between;
+  margin: 14px 0 0; padding-top: 13px;
+  border-top: 2px solid var(--ink);
+  font-size: 18px; font-weight: 680; letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Opt-in, unticked, in a neutral container. Equal weight either way. */
+.consent-widget {
+  margin: 18px 0 0;
+  padding: 14px 16px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.consent-widget label {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 14px; color: var(--ink-2); cursor: pointer;
+}
+.consent-widget input { width: 16px; height: 16px; accent-color: var(--brand); margin: 0; }
+
+.btn-pay {
+  margin-top: 18px;
+  background: var(--brand); color: #ffffff;
+  font-family: inherit; font-size: 16px; font-weight: 620;
+  border: 0; border-radius: 9px; padding: 13px 32px;
+  cursor: pointer;
+}
+.trust { margin: 16px 0 0; font-size: 12px; color: var(--ink-3); }

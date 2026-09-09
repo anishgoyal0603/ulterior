@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html><head><title>StreamBox — Get Premium</title></head>
+<body>
+<h1>StreamBox Premium</h1>
+
+<!--
+  DP-05 fixture, step 1: the OFFER (adapter role="signup").
+
+  The point of this page is what it does NOT say. There is no mention of
+  renewal, recurring charges, monthly billing, or what happens after the
+  first period. It presents a single price and a commitment button, and that
+  is all a user sees before deciding.
+
+  The wording is chosen carefully so the fixture tests what it claims to:
+  "free trial", "subscribe", "monthly" and "annually" are all recurring-
+  billing terms, so using any of them here would make the page DISCLOSE the
+  recurring nature and the detector would correctly stay silent. "Get
+  Premium" is a commitment CTA that carries no such disclosure.
+-->
+
+<p>Thousands of titles in 4K. ₹4,999.</p>
+<div data-price="4999">₹4,999</div>
+
+<button id="get-premium" style="font-size:20px;padding:14px 30px;">Get Premium</button>
+</body></html>

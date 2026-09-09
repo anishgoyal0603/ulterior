@@ -1,0 +1,34 @@
+# ---- Secrets: NEVER commit these ----
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+credentials.json
+service-account*.json
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# ---- Local database & generated artifacts ----
+*.db
+*.sqlite
+*.sqlite3
+
+# ---- Captured evidence (may contain user session data from audited sites) ----
+/tmp/dp_evidence/
+evidence/
+*.har
+
+# ---- Generated reports ----
+*_audit_report.pdf
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+.DS_Store

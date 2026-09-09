@@ -1,0 +1,105 @@
+name: CI
+
+# Runs the full suite on every push and pull request. The point is not
+# ceremony: this project's headline claims are numbers (94.1% urgency
+# detection, 92.9% confirm-shaming, 13 of 13 categories covered, no detector
+# above its evidence tier) and each is asserted by a test. CI is what stops
+# those numbers from quietly becoming false between one commit and a pitch.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push supersedes a run still in progress on the same branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------
+  # The Python suite needs a real browser. The extension suite needs Node
+  # and no browser at all. They were one job, inside the Playwright PYTHON
+  # image — which ships Python and Chromium but no Node runtime, so the
+  # extension step died with "node: not found" (exit 127) and took the
+  # production-config check down with it as a skipped step.
+  #
+  # Two jobs is the right shape, not a workaround: each runs in the
+  # environment it actually needs, they run in parallel, and a failure in
+  # one no longer hides the result of the other.
+  # ---------------------------------------------------------------------
+
+  python-tests:
+    name: Python suite (real browser)
+    runs-on: ubuntu-latest
+    # The official Playwright image ships Chromium plus every system library
+    # it needs. Installing the browser separately in CI is the single most
+    # common source of "works locally, fails in CI" for this stack, and the
+    # image tag is pinned to the same version the Dockerfile deploys with, so
+    # CI cannot pass against a browser build production never runs.
+    container:
+      image: mcr.microsoft.com/playwright/python:v1.47.0-jammy
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          pip install --no-cache-dir -r requirements.txt
+          pip install --no-cache-dir -r requirements-dev.txt
+
+      - name: Run Python test suite (logic and API)
+        # Separate steps on purpose. The browser suite below starts a real
+        # server and drives Chromium, so it is slower and has more ways to be
+        # flaky than the logic tests. Run as one step, a timing flake in the
+        # UI set would report as "the Python suite failed" and hide whether
+        # anything real broke. Two steps means the log says which.
+        run: python -m pytest tests/ -q -m "not ui"
+
+      - name: Run end-to-end browser suite
+        run: python -m pytest tests/ -q -m ui
+
+      - name: Verify the app boots with a production-shaped config
+        # Guards the fail-fast config path in the direction that actually
+        # matters. A test asserting production REFUSES bad config already
+        # exists; this asserts it ACCEPTS good config, which is the failure
+        # that would otherwise only be discovered during a real deploy.
+        env:
+          APP_ENV: production
+          DATABASE_URL: postgresql://u:p@localhost:5432/db?sslmode=require
+          API_KEYS: ci_read_key_that_is_definitely_long_enough_x,ci_admin_key_that_is_long_enough_y
+          ADMIN_API_KEYS: ci_admin_key_that_is_long_enough_y
+          CORS_ALLOW_ORIGINS: https://example.invalid
+        run: python -c "from app import config; config.validate(); print('production config accepted')"
+
+  extension-tests:
+    name: Browser-extension suite (Node)
+    runs-on: ubuntu-latest
+    # No container: these tests run extension/content.js in plain Node against
+    # a mocked DOM. They need a Node runtime and nothing else — no Python, no
+    # Chromium, no system libraries.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Syntax-check the extension sources
+        # Cheap and worth its place: content.js is loaded by a real browser,
+        # not by a bundler, so a syntax error would ship silently and only
+        # surface when someone installed the extension.
+        run: |
+          node --check extension/content.js
+          node --check extension/background.js
+          node --check extension/popup.js
+
+      - name: Validate the extension manifest
+        run: node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json','utf8')); console.log('manifest.json is valid JSON')"
+
+      - name: Run browser-extension tests
+        run: node tests/test_extension_cache.js

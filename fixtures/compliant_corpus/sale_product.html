@@ -1,0 +1,24 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<title>Kesari Home - Cotton Bedsheet</title><link rel="stylesheet" href="shop.css"></head>
+<body><header>Kesari Home</header><main><div class="card">
+<h1>Cotton Bedsheet, Double</h1>
+<p class="price" data-price="1299">₹1,299</p>
+<p class="note">Independence Day sale. Hurry, offer ends 15 August.
+  Sale ends in <span id="t">02:41:07</span>.</p>
+<p class="note">Price includes all taxes and delivery. No fees are added later.</p>
+<a class="cta" href="sale_checkout.html">Proceed to Checkout</a>
+</div></main>
+<footer>Kesari Home · Returns within 7 days · GSTIN 09AAACK1234M1ZP</footer>
+<script>
+// A REAL countdown: counted from a fixed absolute deadline, so it decreases
+// with wall-clock time and keeps decreasing across a reload. This is what an
+// honest timer does, and DP-01 must not report it.
+var deadline = Date.now() + 9667 * 1000;
+function tick() {
+  var s = Math.max(0, Math.floor((deadline - Date.now()) / 1000));
+  var h = String(Math.floor(s/3600)).padStart(2,'0');
+  var m = String(Math.floor((s%3600)/60)).padStart(2,'0');
+  document.getElementById('t').textContent = h + ':' + m + ':' + String(s%60).padStart(2,'0');
+}
+tick(); setInterval(tick, 1000);
+</script></body></html>

@@ -1,0 +1,9 @@
+# Production-only dependencies. Installed by the Dockerfile, NOT needed to run
+# or test locally.
+#
+# psycopg2-binary is the PostgreSQL driver. SQLAlchemy loads a driver lazily
+# based on the DATABASE_URL scheme, so local development on SQLite never needs
+# it -- and it is another package with no wheel on the newest Python releases,
+# which would fail a local install for no benefit.
+
+psycopg2-binary==2.9.*

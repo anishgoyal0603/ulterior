@@ -1,0 +1,10 @@
+# Test-only dependencies.
+#
+# Kept out of requirements.txt on purpose: that file is what the Dockerfile
+# installs, and a production image should not carry a PDF text-extraction
+# library it never calls. Nothing here is imported by application code.
+
+# Reads the generated PDF back so tests/test_report_language.py can assert on
+# what the report ACTUALLY says -- the defamation-sensitive wording is checked
+# against the rendered document, not against the source string that produced it.
+pdfminer.six==20240706

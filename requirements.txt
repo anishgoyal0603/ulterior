@@ -1,0 +1,24 @@
+# Runtime dependencies for local development and for the container.
+#
+# Deliberately minimal. Four packages used to sit here that nothing in the
+# codebase ever imported -- lxml, beautifulsoup4, celery and redis. They were
+# not free: lxml has no prebuilt wheel for the newest Python releases, so pip
+# fell back to compiling it from C source, which fails on any Windows machine
+# without the Microsoft C++ Build Tools installed. An unused dependency that
+# breaks installation for a whole platform is worse than no dependency, so
+# they are gone. (Celery and Redis are still the documented scale-out path in
+# app/tasks.py -- they just are not imported yet, so they do not belong here
+# yet either.)
+
+fastapi==0.115.*
+uvicorn[standard]==0.32.*
+sqlalchemy==2.0.*
+pydantic==2.*
+reportlab==4.4.*
+playwright==1.47.*
+anthropic==0.40.*
+
+# Test runner and HTTP client are needed by the app's own test suite, which is
+# the first thing anyone runs after cloning.
+pytest==8.*
+httpx==0.27.*

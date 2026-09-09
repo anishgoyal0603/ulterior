@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html><head><title>HonestShop — Checkout</title></head>
+<body>
+<h1>Checkout</h1>
+
+<!--
+  The negative control for every detector added in the "all 13" build.
+
+  This page deliberately contains the near-miss version of each pattern:
+    * required fields that are genuinely necessary (address, card)
+    * an OPTIONAL, unticked marketing consent
+    * a subscription offer that discloses its recurring terms upfront
+    * a dismissible, non-blocking banner shown once
+    * an honestly labelled executable download
+    * a plainly worded decline button
+    * a visible cancellation route
+
+  If any detector fires on this page, that detector is wrong. This file is
+  worth more than any of the positive fixtures: positives prove a detector
+  can fire, and only a page like this proves it knows when not to.
+-->
+
+<form id="checkout">
+  <label for="addr">Delivery address</label>
+  <input type="text" id="addr" name="addr" required>
+
+  <label for="card">Card number</label>
+  <input type="text" id="card" name="card" required>
+
+  <div>
+    <input type="checkbox" id="marketing-optional" name="marketing-optional">
+    <label for="marketing-optional">Send me marketing emails (optional)</label>
+  </div>
+
+  <div>
+    <input type="radio" id="plan-monthly" name="plan">
+    <label for="plan-monthly">StreamBox Premium — ₹499 per month, renews automatically. Cancel my subscription anytime from Settings.</label>
+  </div>
+
+  <button type="submit">Place order</button>
+  <button class="btn-decline" style="background:#fff;color:#222;font-size:14px;padding:10px 20px;">No thanks</button>
+</form>
+
+<div class="banner" style="position:static;padding:8px;">
+  <span>We use cookies.</span>
+  <button id="ok-cookies">Close</button>
+</div>
+
+<a href="/files/receipt.pdf">Download your receipt (PDF)</a>
+<div data-price="499">₹499</div>
+</body></html>

@@ -1,0 +1,630 @@
+/* =========================================================================
+   Ulterior — public demo
+   =========================================================================
+
+   Design notes worth knowing before editing:
+
+   * NO WEBFONTS. This app's own CSP is `default-src 'none'` with no external
+     origin allowed, and a test asserts no http(s) origin ever appears in it.
+     A Google Fonts link would be blocked, silently, and the page would fall
+     back mid-render. System faces also mean the page paints instantly and
+     works with no network at all — correct for a tool that runs on localhost.
+     Hierarchy here comes from weight, size, spacing and colour, not a face.
+
+   * THE THREE TIER COLOURS ARE DATA, NOT DECORATION. provable / corroborated
+     / indicative are the evidence tiers, and they are the only place these
+     hues appear — never on a button, never on a heading. They were validated
+     for colour-blind separation and contrast against both surfaces rather
+     than picked by eye, so do not nudge them casually. Every use is paired
+     with the tier's name in text, so the colour is never carrying the meaning
+     alone.
+
+   * Interactive chrome is graphite, deliberately, so it cannot be confused
+     with a tier colour.
+   ========================================================================= */
+
+:root {
+  --bg:            #f2f5f7;
+  --surface:       #ffffff;
+  --surface-2:     #f8fafb;
+  --surface-3:     #eef2f5;
+
+  --ink:           #0f1720;
+  --ink-2:         #4a5a6b;
+  --ink-3:         #71828f;
+
+  --line:          #e0e7ec;
+  --line-2:        #cfd9e0;
+
+  --btn:           #16212c;
+  --btn-hover:     #24313e;
+  --btn-ink:       #ffffff;
+  --focus:         #0f6f7a;
+
+  /* Evidence tiers — validated, do not eyeball-adjust. */
+  --prov:          #0e9e6e;
+  --corr:          #4a4fd0;
+  --ind:           #bd7a12;
+  --prov-wash:     #e7f7f0;
+  --corr-wash:     #ecedfc;
+  --ind-wash:      #fbf2e2;
+
+  --shadow-sm:     0 1px 2px rgba(15, 23, 32, 0.05);
+  --shadow-md:     0 1px 3px rgba(15, 23, 32, 0.06), 0 8px 24px -12px rgba(15, 23, 32, 0.16);
+
+  --radius:        10px;
+  --radius-sm:     7px;
+
+  --ui: ui-sans-serif, -apple-system, "Segoe UI Variable Text", "Segoe UI",
+        Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas,
+          "Liberation Mono", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:        #0b0f14;
+    --surface:   #131a22;
+    --surface-2: #172029;
+    --surface-3: #1d2731;
+
+    --ink:       #e7eef5;
+    --ink-2:     #9aabbb;
+    --ink-3:     #7a8b9a;
+
+    --line:      #222e39;
+    --line-2:    #31404d;
+
+    --btn:       #e7eef5;
+    --btn-hover: #ffffff;
+    --btn-ink:   #0f1720;
+    --focus:     #3aa9b4;
+
+    --prov:      #21a97a;
+    --corr:      #7280e8;
+    --ind:       #b88418;
+    --prov-wash: #10281f;
+    --corr-wash: #1a1e3a;
+    --ind-wash:  #2a2210;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.5), 0 8px 24px -12px rgba(0, 0, 0, 0.7);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg:        #0b0f14;
+  --surface:   #131a22;
+  --surface-2: #172029;
+  --surface-3: #1d2731;
+  --ink:       #e7eef5;
+  --ink-2:     #9aabbb;
+  --ink-3:     #7a8b9a;
+  --line:      #222e39;
+  --line-2:    #31404d;
+  --btn:       #e7eef5;
+  --btn-hover: #ffffff;
+  --btn-ink:   #0f1720;
+  --focus:     #3aa9b4;
+  --prov:      #21a97a;
+  --corr:      #7280e8;
+  --ind:       #b88418;
+  --prov-wash: #10281f;
+  --corr-wash: #1a1e3a;
+  --ind-wash:  #2a2210;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.5), 0 8px 24px -12px rgba(0, 0, 0, 0.7);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--ui);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* --- Masthead ---------------------------------------------------------- */
+
+.masthead {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.masthead-in {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 20px 28px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 40px;
+  align-items: center;
+  justify-content: space-between;
+}
+.brand { display: flex; align-items: center; gap: 14px; }
+
+/* The mark reads as an aperture / lens: the tool looks at something. Built
+   from gradients rather than an SVG file so nothing extra has to load. */
+.mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  flex: none;
+  background:
+    radial-gradient(circle at 50% 50%, var(--surface) 0 22%, transparent 23%),
+    conic-gradient(from 210deg, var(--prov), var(--corr) 45%, var(--ind) 78%, var(--prov));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+.brand h1 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 640;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+.sub {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  line-height: 1.45;
+}
+.law {
+  margin: 0;
+  max-width: 42ch;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  border-left: 2px solid var(--line-2);
+  padding-left: 14px;
+}
+.law strong { color: var(--ink); font-weight: 600; }
+
+/* --- Shell ------------------------------------------------------------- */
+
+.wrap {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 24px 28px 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* --- Run bar ----------------------------------------------------------- */
+
+.runbar {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 16px 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.runbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.runbar label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.select-shell { position: relative; display: inline-flex; }
+.select-shell::after {
+  content: "";
+  position: absolute;
+  right: 13px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -5px;
+  border-right: 1.6px solid var(--ink-3);
+  border-bottom: 1.6px solid var(--ink-3);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+select {
+  appearance: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: 9px 36px 9px 13px;
+  min-width: 290px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+select:hover { border-color: var(--ink-3); }
+
+button.primary {
+  font: inherit;
+  font-size: 14px;
+  font-weight: 570;
+  color: var(--btn-ink);
+  background: var(--btn);
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 10px 20px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease, opacity 0.15s ease;
+}
+button.primary:hover:not(:disabled) { background: var(--btn-hover); }
+button.primary:active:not(:disabled) { transform: translateY(1px); }
+button.primary:disabled { opacity: 0.5; cursor: default; }
+
+.status {
+  font-size: 13.5px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.status.is-error {
+  color: var(--ink);
+  background: var(--ind-wash);
+  border: 1px solid var(--ind);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+/* A determinate-looking bar for an indeterminate wait. It communicates
+   "working", not progress, so it loops rather than filling to 100% — a fake
+   percentage on an unknown duration is a small lie. */
+.progress {
+  height: 2px;
+  background: var(--surface-3);
+  border-radius: 2px;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.progress.on { opacity: 1; }
+.progress span {
+  display: block;
+  height: 100%;
+  width: 34%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--focus), transparent);
+  transform: translateX(-100%);
+}
+.progress.on span { animation: sweep 1.35s ease-in-out infinite; }
+@keyframes sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(330%); }
+}
+
+.hint {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  line-height: 1.5;
+  max-width: 90ch;
+}
+
+/* --- KPI tiles --------------------------------------------------------- */
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+.kpi {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  position: relative;
+  overflow: hidden;
+}
+/* A hairline of the tier's colour rather than a coloured card: the number is
+   the content, the hue is only its label. */
+.kpi::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--line-2);
+}
+.kpi.t-prov::before { background: var(--prov); }
+.kpi.t-corr::before { background: var(--corr); }
+.kpi.t-ind::before  { background: var(--ind); }
+
+.k-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.k-value {
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.k-note {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  line-height: 1.35;
+}
+
+/* --- Split ------------------------------------------------------------- */
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.panel-head {
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  background: var(--surface-2);
+}
+.panel-head h2 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 620;
+  letter-spacing: -0.005em;
+}
+.panel-tag {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* --- Browser chrome around the audited page ---------------------------- */
+
+.browser {
+  margin: 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+.browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--surface-3);
+  border-bottom: 1px solid var(--line);
+}
+.dots { display: inline-flex; gap: 5px; flex: none; }
+.dots i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--line-2);
+}
+.addr {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 3px 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#frame {
+  width: 100%;
+  height: 520px;
+  border: 0;
+  display: block;
+  background: #ffffff;   /* the audited page paints its own ground */
+}
+
+/* --- Findings ---------------------------------------------------------- */
+
+.findings {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 592px;
+  overflow-y: auto;
+}
+.empty {
+  color: var(--ink-3);
+  font-size: 13.5px;
+  line-height: 1.6;
+  padding: 26px 18px;
+  text-align: center;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius-sm);
+}
+.empty p { margin: 0 0 6px; }
+.empty p:last-child { margin: 0; }
+.empty strong { color: var(--ink-2); }
+
+.finding {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  background: var(--surface-2);
+  animation: rise 0.28s ease both;
+}
+.finding:has(.tier-provable)     { border-left-color: var(--prov); }
+.finding:has(.tier-corroborated) { border-left-color: var(--corr); }
+.finding:has(.tier-indicative)   { border-left-color: var(--ind); }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.finding .top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+.finding .code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.finding .name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.finding .tier {
+  font-size: 10.5px;
+  font-weight: 620;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 20px;
+  padding: 2px 9px;
+}
+.tier-provable     { color: var(--prov); background: var(--prov-wash); }
+.tier-corroborated { color: var(--corr); background: var(--corr-wash); }
+.tier-indicative   { color: var(--ind);  background: var(--ind-wash); }
+
+.finding .step {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.finding p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+.finding .evidence {
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 9px 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow: auto;
+}
+
+/* --- Legend ------------------------------------------------------------ */
+
+.legend {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 16px 18px;
+}
+.legend-title {
+  margin: 0 0 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.legend-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px 24px;
+}
+.legend-item {
+  display: flex;
+  gap: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.legend-item strong { color: var(--ink); font-weight: 620; }
+.legend-item .swatch {
+  width: 3px;
+  flex: none;
+  border-radius: 2px;
+  background: var(--line-2);
+}
+.legend-item.t-prov .swatch { background: var(--prov); }
+.legend-item.t-corr .swatch { background: var(--corr); }
+.legend-item.t-ind  .swatch { background: var(--ind); }
+.legend-foot {
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+/* --- Responsive -------------------------------------------------------- */
+
+@media (max-width: 1080px) {
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .findings { max-height: none; }
+  #frame { height: 440px; }
+}
+@media (max-width: 720px) {
+  .masthead-in, .wrap { padding-left: 16px; padding-right: 16px; }
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+  select { min-width: 0; width: 100%; }
+  .runbar-row { gap: 10px; }
+  .law { border-left: 0; padding-left: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

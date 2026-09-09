@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html><head><title>ToolSuite — Choose your plan</title></head>
+<body>
+<h1>Choose your plan</h1>
+
+<!--
+  DP-12 fixture. The pre-selected control is a RADIO, not a checkbox, because
+  that is what a pre-selected paid tier actually is in the real world. A
+  checkbox-only extractor was structurally blind to this shape.
+
+  The free plan is the false-positive guard: it is a radio too, it is simply
+  not the selected one, and its label carries no recurring-billing language.
+  A ₹0 plan being available must never be reported as a billing violation.
+-->
+
+<fieldset>
+  <legend>Plans</legend>
+
+  <input type="radio" id="plan-pro" name="plan" checked>
+  <label for="plan-pro">Pro — ₹999 billed monthly, renews automatically</label>
+
+  <input type="radio" id="plan-free" name="plan">
+  <label for="plan-free">Free — ₹0, no card required</label>
+</fieldset>
+
+<button id="continue">Continue</button>
+</body></html>

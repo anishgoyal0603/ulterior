@@ -1,0 +1,33 @@
+/* Styling modelled on a real Indian OTA flight-results page, so the geometry
+   and contrast detectors see something close to what they would see live.
+   Contrast is ordinary and readable throughout -- on the real page it is too. */
+:root { --ink:#1a1a1a; --ink-2:#4a4a4a; --ink-3:#757575; --line:#e7e7e7; --blue:#008cff; }
+*{box-sizing:border-box}
+body{margin:0;background:#f2f2f2;color:var(--ink);font-size:14px;line-height:1.5;
+     font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+header{background:#fff;border-bottom:1px solid var(--line);padding:12px 20px}
+main{max-width:900px;margin:0 auto;padding:16px 20px 40px}
+.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:14px 18px;margin-bottom:12px}
+.row{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
+.airline{font-weight:700;font-size:15px;min-width:150px}
+.time{font-weight:700;font-size:17px}
+.dur{color:var(--ink-3);font-size:13px}
+.fare{font-weight:700;font-size:17px;margin-left:auto}
+.ontime{display:inline-block;background:#eafaf1;color:#1b7a43;font-size:12px;
+        border-radius:4px;padding:2px 8px;margin-bottom:6px}
+.perk{color:var(--ink-2);font-size:13px;margin:6px 0 0}
+.offer{color:#1b7a43;font-size:13px}
+.lockrow{margin-top:8px;font-size:13px;color:#1a6ecc}
+.banner{background:#123;color:#fff;border-radius:8px;padding:14px 18px;margin-bottom:12px;
+        display:flex;align-items:center;gap:14px}
+.banner button{margin-left:auto;background:var(--blue);color:#fff;border:0;border-radius:6px;
+        padding:9px 20px;font:inherit;font-weight:600;cursor:pointer}
+.adlabel{float:right;color:var(--ink-3);font-size:12px}
+.sponsored{display:inline-block;background:#eee;color:#333;font-size:12px;font-weight:700;
+        border-radius:3px;padding:2px 7px}
+label{display:flex;gap:9px;align-items:center;color:var(--ink-2);margin:10px 0}
+.fare-line{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);color:var(--ink-2)}
+.fare-total{display:flex;justify-content:space-between;margin-top:12px;padding-top:11px;
+        border-top:2px solid var(--ink);font-size:17px;font-weight:700}
+.cta{background:var(--blue);color:#fff;border:0;border-radius:8px;padding:12px 28px;
+     font:inherit;font-weight:700;cursor:pointer;margin-top:14px}
