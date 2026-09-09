@@ -54,8 +54,9 @@ class ViolationOut(BaseModel):
     # leaks server directory structure to any API caller.
     has_screenshot: bool = False
 
-    class Config:
-        from_attributes = True
+    # model_config, not `class Config` -- the class-based form is the
+    # Pydantic v1 style, deprecated in v2 and removed in v3.
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AuditJobOut(BaseModel):
@@ -72,8 +73,9 @@ class AuditJobOut(BaseModel):
     discovery: Optional[dict] = None
     violations: List[ViolationOut] = []
 
-    class Config:
-        from_attributes = True
+    # model_config, not `class Config` -- the class-based form is the
+    # Pydantic v1 style, deprecated in v2 and removed in v3.
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DemoAuditCreate(BaseModel):

@@ -88,7 +88,7 @@ def _run_job(job_id: int, adapter_name: Optional[str], target_urls: Optional[Lis
              use_llm: bool = False, auto_discover: bool = False):
     db = SessionLocal()
     try:
-        job = db.query(AuditJob).get(job_id)
+        job = db.get(AuditJob, job_id)
         job.status = "running"
         db.commit()
 
@@ -176,7 +176,7 @@ def _run_job(job_id: int, adapter_name: Optional[str], target_urls: Optional[Lis
             logger.exception("Rollback failed for audit job %s", job_id)
 
         try:
-            job = db.query(AuditJob).get(job_id)
+            job = db.get(AuditJob, job_id)
             if job is not None:
                 job.status = "failed"
                 job.completed_at = datetime.now(timezone.utc)
@@ -190,7 +190,7 @@ def _run_job(job_id: int, adapter_name: Optional[str], target_urls: Optional[Lis
             logger.exception("Could not mark audit job %s failed on its own session", job_id)
             try:
                 with SessionLocal() as recovery:
-                    row = recovery.query(AuditJob).get(job_id)
+                    row = recovery.get(AuditJob, job_id)
                     if row is not None:
                         row.status = "failed"
                         row.error_message = (

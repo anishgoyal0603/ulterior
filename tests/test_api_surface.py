@@ -313,6 +313,56 @@ def test_launchers_ask_for_supported_python_versions_by_name():
     assert "python3.12 python3.13 python3.11 python3.10" in sh
 
 
+def _code_lines(path):
+    """The file's executable lines, with comments and strings blanked out.
+
+    A grep for a deprecated construct hits the comment that EXPLAINS why the
+    construct was removed, so the file documenting the fix fails the test
+    checking for the fix. Tokenising instead of pattern-matching means the
+    explanation can stay in the source where it is useful.
+    """
+    import io
+    import tokenize
+
+    source = path.read_text()
+    lines = source.splitlines()
+    blanked = list(lines)
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(source).readline)
+        for tok in tokens:
+            if tok.type not in (tokenize.COMMENT, tokenize.STRING):
+                continue
+            for row in range(tok.start[0], tok.end[0] + 1):
+                blanked[row - 1] = ""
+    except tokenize.TokenError:  # pragma: no cover - only on unparseable source
+        return [line.strip() for line in lines]
+    return [line.strip() for line in blanked if line.strip()]
+
+
+def test_no_deprecated_framework_constructs_remain():
+    """The suite used to print 38 warnings. That is not cosmetic.
+
+    A wall of warnings is where a real signal goes to hide -- the line saying
+    six tests had SKIPPED sat in the middle of that wall for days, and nobody
+    saw it. Each of these is also a genuine time bomb: on_event and the
+    class-based Config are both scheduled for removal, and Query.get() is
+    legacy in SQLAlchemy 2.x. Down to one warning now, and that one is inside
+    Starlette's own code, so it is theirs to fix and not ours to silence.
+    """
+    root = Path(__file__).parent.parent
+    banned = {
+        "@app.on_event": "FastAPI removed this; use the lifespan handler in main.py",
+        "class Config:": "Pydantic v1 style; use model_config = ConfigDict(...)",
+        ").get(job_id)": "legacy SQLAlchemy; use db.get(Model, job_id)",
+    }
+    for source in ("app/main.py", "app/schemas.py", "app/tasks.py"):
+        for construct, why in banned.items():
+            offenders = [line for line in _code_lines(root / source) if construct in line]
+            assert not offenders, (
+                f"{source} still uses {construct!r} -- {why}\n  " + "\n  ".join(offenders)
+            )
+
+
 def test_the_setup_path_installs_the_test_only_dependencies_too():
     """CI installs requirements-dev.txt and the launchers did not.
 

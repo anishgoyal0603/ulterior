@@ -2,6 +2,7 @@ import json
 import threading
 import logging
 import os
+from contextlib import asynccontextmanager
 from typing import List
 
 from fastapi import FastAPI, Depends, HTTPException, Request
@@ -33,7 +34,61 @@ logger = logging.getLogger(__name__)
 # (SQLite in prod, no TLS on the DB connection, wildcard/plain-HTTP CORS).
 config.validate()
 
+
+def _retention_loop(stop_event: "threading.Event") -> None:
+    """Apply the retention policy periodically, not only at boot.
+
+    purge_expired() was called once in the startup hook and nowhere else, so
+    RETENTION_DAYS and MAX_STORED_AUDITS bounded NOTHING on a server that
+    stays up -- which is the only kind of server the policy is for. A deployed
+    instance ran for weeks accumulating rows and screenshot files that nothing
+    ever removed.
+
+    A daemon thread rather than a scheduler dependency: this is one call an
+    hour, and the project deliberately runs with no extra infrastructure.
+    """
+    while not stop_event.wait(config.RETENTION_SWEEP_SECONDS):
+        try:
+            removed = purge_expired()
+            if removed:
+                logger.info("Retention purge removed %s expired audit(s)", removed)
+        except Exception:
+            logger.exception("Periodic retention purge failed")
+
+
+_retention_stop = threading.Event()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Startup before the yield, shutdown after it.
+
+    This replaces @app.on_event("startup"/"shutdown"), which FastAPI has
+    deprecated and will remove. The pair had a real weakness beyond the
+    warning: two independent hooks can run in either order relative to other
+    handlers, whereas a lifespan makes the shutdown the literal continuation
+    of the startup -- the sweep thread is stopped by the same block that
+    started it, and it cannot be started without that stop being registered.
+    """
+    init_db()
+    logger.info("Dark Pattern Auditor starting - %s", config.startup_report())
+    try:
+        removed = purge_expired()
+        if removed:
+            logger.info("Retention purge removed %s expired audit(s)", removed)
+    except Exception:
+        logger.exception("Retention purge failed at startup")
+
+    threading.Thread(target=_retention_loop, args=(_retention_stop,),
+                     name="retention-sweep", daemon=True).start()
+    try:
+        yield
+    finally:
+        _retention_stop.set()
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Dark Pattern Auditor",
     description="Automated CCPA (India) Dark Patterns Guidelines, 2023 compliance auditor "
                 "for e-commerce, travel, and other consumer-facing web funnels — SIH26199",
@@ -93,50 +148,6 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     )
 
 
-def _retention_loop(stop_event: "threading.Event") -> None:
-    """Apply the retention policy periodically, not only at boot.
-
-    purge_expired() was called once in the startup hook and nowhere else, so
-    RETENTION_DAYS and MAX_STORED_AUDITS bounded NOTHING on a server that
-    stays up -- which is the only kind of server the policy is for. A deployed
-    instance ran for weeks accumulating rows and screenshot files that nothing
-    ever removed.
-
-    A daemon thread rather than a scheduler dependency: this is one call an
-    hour, and the project deliberately runs with no extra infrastructure.
-    """
-    while not stop_event.wait(config.RETENTION_SWEEP_SECONDS):
-        try:
-            removed = purge_expired()
-            if removed:
-                logger.info("Retention purge removed %s expired audit(s)", removed)
-        except Exception:
-            logger.exception("Periodic retention purge failed")
-
-
-_retention_stop = threading.Event()
-
-
-@app.on_event("startup")
-def on_startup():
-    init_db()
-    logger.info("Dark Pattern Auditor starting — %s", config.startup_report())
-    try:
-        removed = purge_expired()
-        if removed:
-            logger.info("Retention purge removed %s expired audit(s)", removed)
-    except Exception:
-        logger.exception("Retention purge failed at startup")
-
-    threading.Thread(target=_retention_loop, args=(_retention_stop,),
-                     name="retention-sweep", daemon=True).start()
-
-
-@app.on_event("shutdown")
-def on_shutdown():
-    _retention_stop.set()
-
-
 def _to_violation_out(v: models.ViolationRecord) -> schemas.ViolationOut:
     return schemas.ViolationOut(
         id=v.id, pattern_code=v.pattern_code, pattern_name=v.pattern_name,
@@ -183,14 +194,14 @@ def create_audit(payload: schemas.AuditJobCreate, db: Session = Depends(get_db),
         raise HTTPException(status_code=400, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    job = db.query(models.AuditJob).get(job_id)
+    job = db.get(models.AuditJob, job_id)
     return _to_job_out(job)
 
 
 @app.get("/audits/{job_id}", response_model=schemas.AuditJobOut)
 def get_audit(job_id: int = PathParam(..., ge=1, lt=2**63, description="Audit job id"), db: Session = Depends(get_db),
               _key: str = Depends(require_api_key)):
-    job = db.query(models.AuditJob).get(job_id)
+    job = db.get(models.AuditJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return _to_job_out(job)
@@ -249,7 +260,7 @@ def delete_audit(job_id: int = PathParam(..., ge=1, lt=2**63, description="Audit
     audited page, and this endpoint removes it at its actual granularity:
     the audit run.
     """
-    job = db.query(models.AuditJob).get(job_id)
+    job = db.get(models.AuditJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -339,7 +350,7 @@ def create_demo_audit(payload: schemas.DemoAuditCreate, db: Session = Depends(ge
             detail=f"The public demo runs only: {list(config.PUBLIC_DEMO_ADAPTERS)}",
         )
     job_id = submit_audit_job(payload.adapter_name, None)
-    job = db.query(models.AuditJob).get(job_id)
+    job = db.get(models.AuditJob, job_id)
     return _to_job_out(job)
 
 
@@ -349,7 +360,7 @@ def get_demo_audit(job_id: int = PathParam(..., ge=1, lt=2**63, description="Aud
     an unauthenticated window onto real audits someone else ran."""
     if not config.PUBLIC_DEMO_ENABLED:
         raise HTTPException(status_code=404, detail="Not found")
-    job = db.query(models.AuditJob).get(job_id)
+    job = db.get(models.AuditJob, job_id)
     if not job or job.adapter_name not in config.PUBLIC_DEMO_ADAPTERS:
         raise HTTPException(status_code=404, detail="Demo audit not found")
     return _to_job_out(job)
