@@ -281,6 +281,25 @@ open-source demo, or a store you own. Not because it would break — the
 crawler never clicks a control that could spend money — but because a finding
 is a public statement that a named business is deceiving customers.
 
+### Auditing a big commercial site (Amazon, MakeMyTrip, Flipkart)
+
+Do not point the crawler at them. It will not get past their bot protection,
+it will never reach the checkout behind their login, and automated access is
+against their terms. Instead, browse the funnel yourself as an ordinary
+customer, save each page (`Ctrl+S` -> "Webpage, Complete"), and run:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\audit_url.py --saved 1-product.html 2-cart.html 3-checkout.html
+```
+
+That measures what YOU were shown. It is a customer documenting their own
+transaction rather than a robot hitting a server, it gets past the login
+because you logged in, and the evidence is a screenshot any human can check.
+
+**Read `VERIFYING_A_FINDING.md` before repeating any finding to anyone.** It
+explains how to tell a real finding from a false one, and lists the four false
+positives this tool has actually produced so you know their shapes.
+
 `TESTING_REAL_SITES.md` has the full procedure, including how to audit a
 store running on your own machine.
 

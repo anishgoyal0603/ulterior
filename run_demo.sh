@@ -76,6 +76,7 @@ echo "==> Installing the Chromium build Playwright expects"
   echo "     Chromium, set PLAYWRIGHT_BROWSERS_PATH and re-run)"
 }
 
+echo "==> Ulterior by The Odyssey"
 echo "==> Starting the API on http://127.0.0.1:${PORT}"
 echo
 echo "    Demo (start here) : http://127.0.0.1:${PORT}/demo/"

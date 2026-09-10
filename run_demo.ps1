@@ -172,6 +172,7 @@ Invoke-Step "Installing the test-only dependencies" { & $VPy -m pip install --qu
 Invoke-Step "Installing the Chromium build Playwright expects" { & $VPy -m playwright install chromium }
 
 Write-Host ""
+Write-Host "==> Ulterior by The Odyssey" -ForegroundColor Green
 Write-Host "==> Starting the API on http://127.0.0.1:$Port" -ForegroundColor Green
 Write-Host ""
 Write-Host "    Demo (start here) : http://127.0.0.1:$Port/demo/"

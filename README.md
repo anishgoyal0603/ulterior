@@ -1,4 +1,6 @@
-# Dark Pattern Auditor — SIH26199
+# Ulterior by The Odyssey
+
+SIH26199 · automated auditing for India's 13 specified dark patterns.
 
 Automated compliance auditor for India's **Guidelines for Prevention and
 Regulation of Dark Patterns, 2023** (Central Consumer Protection Authority).

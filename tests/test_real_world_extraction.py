@@ -536,3 +536,34 @@ def test_a_currency_code_inside_an_ordinary_word_is_not_money():
     items = _line_items_from_text(["SNEAKERS Plimsolls $55.00"])
     assert items and items[0]["name"] == "SNEAKERS Plimsolls", items
     assert parse_money("SNEAKERS 55") is None
+
+
+def test_saved_pages_mode_audits_a_funnel_you_captured_yourself(capsys):
+    """The mode that makes a big commercial site auditable WITHOUT crawling it.
+
+    A person browses the funnel as an ordinary customer, saves the pages they
+    were shown, and the tool measures those. That is a customer documenting
+    their own transaction rather than a robot hitting a server it was not
+    invited to, and it is the only route that reaches a checkout behind a
+    login this tool will never type into.
+    """
+    import scripts.audit_url as harness
+
+    dark = Path(__file__).parent.parent / "fixtures" / "ecommerce_dark"
+    result = harness.audit_saved_pages(
+        [str(dark / n) for n in ("listing.html", "cart.html", "checkout.html")])
+    codes = {f["code"] for f in result["findings"]}
+    assert "DP-08" in codes and "DP-02" in codes, result
+
+    # DP-01 must NOT appear: proving a countdown is fake needs the page loaded
+    # twice with real time between, and a saved file cannot be reloaded that
+    # way. Reporting it anyway would be a claim the evidence cannot support.
+    assert "DP-01" not in codes, (
+        "a countdown was called fake from a static file, which cannot show one"
+    )
+
+
+def test_saved_pages_mode_says_so_when_a_file_is_missing(capsys):
+    import scripts.audit_url as harness
+    result = harness.audit_saved_pages(["/no/such/page.html"])
+    assert "error" in result and "not found" in result["error"]

@@ -120,7 +120,24 @@ async function runAudit() {
         if (!pollResponse.ok) {
           clearInterval(poll);
           setRunning(false);
-          setStatus(`Lost contact with the server (${pollResponse.status}).`, true);
+          // Say what actually happened. "Lost contact with the server (429)"
+          // was shown while the server was answering perfectly well: a 429 is
+          // a clear, deliberate reply meaning "slow down". Describing it as a
+          // lost connection sends the reader to check the terminal, the
+          // network and the firewall -- none of which are the problem, and
+          // none of which they have time for mid-demo.
+          if (pollResponse.status === 429) {
+            setStatus("Too many requests from this address in the last minute. "
+                      + "The audit is probably still running — wait a few "
+                      + "seconds and press Run the audit again.", true);
+          } else if (pollResponse.status === 404) {
+            setStatus("That audit is no longer on the server. Press Run the "
+                      + "audit to start a new one.", true);
+          } else {
+            setStatus(`The server refused the status request (HTTP `
+                      + `${pollResponse.status}). The terminal running the `
+                      + `server will have the detail.`, true);
+          }
           return;
         }
         job = await pollResponse.json();

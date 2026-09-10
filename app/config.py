@@ -105,6 +105,14 @@ MAX_STORED_AUDITS = int(os.environ.get("MAX_STORED_AUDITS", "500"))
 RATE_LIMIT_AUDIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_AUDIT_PER_MINUTE", "5"))
 RATE_LIMIT_DELETE_PER_HOUR = int(os.environ.get("RATE_LIMIT_DELETE_PER_HOUR", "3"))
 RATE_LIMIT_DEFAULT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_DEFAULT_PER_MINUTE", "60"))
+# Status polling and static page furniture are cheap, and the demo page does a
+# lot of both: it polls every 900ms while an audit runs, and every stylesheet,
+# script and storefront page inside the iframe is a request too. Sharing the
+# 60/minute default with them made the demo rate-limit itself after two runs.
+# These budgets are still bounded -- they cap memory and abuse -- but they are
+# sized for what the page genuinely does rather than for launching browsers.
+RATE_LIMIT_POLL_PER_MINUTE = int(os.environ.get("RATE_LIMIT_POLL_PER_MINUTE", "240"))
+RATE_LIMIT_STATIC_PER_MINUTE = int(os.environ.get("RATE_LIMIT_STATIC_PER_MINUTE", "600"))
 
 # Trust X-Forwarded-For only when explicitly enabled. Behind a reverse proxy
 # this must be on, or every client looks like the proxy and rate limiting

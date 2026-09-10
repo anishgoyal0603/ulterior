@@ -119,6 +119,69 @@ private repo it cannot see, and that authorisation is yours to give, not mine.
 
 ---
 
+## 3b. "Audit any site, log in, act agentically" — what that should mean
+
+This is the stated goal, and most of it is right. One part of it is a trap,
+and the trap has a better answer that is already half-built in this repo.
+
+### Do not make the tool ask for login credentials
+
+It is the obvious way to reach a checkout, and it should not be built:
+
+* **It makes this project a credential-harvesting surface.** The moment a
+  public tool has a box asking for someone's Amazon password, it must be
+  defended like a password manager — encryption at rest, key rotation, breach
+  response, an audited threat model. A student project cannot honestly promise
+  that, and "we only store it in memory" stops being true the first time
+  someone adds a retry queue.
+* **It does not survive contact with reality.** Every large site sends an OTP,
+  a CAPTCHA, or a device check on a login from an unfamiliar browser. The
+  automation fails, and it fails *after* the user has handed over a password.
+* **It turns a measuring instrument into an access service.** Anyone could
+  paste any site plus any credentials. Whatever the intent, that is a tool for
+  logging into other people's accounts.
+* **A reviewer will ask.** "Where do the passwords go?" is the first question a
+  security-minded judge asks, and there is no good answer that ends with a
+  password box.
+
+### The better answer, which is already in `extension/`
+
+The browser extension runs as a content script on every page the user visits,
+in **their own browser, in their own already-logged-in session**. It sees the
+real checkout because the person is genuinely signed in — and **no credential
+ever touches this project**. That is not a compromise; it is strictly better
+on every axis: it works on sites with 2FA, it works on sites that would block
+a crawler, it cannot be abused to access anyone else's account, and it needs
+no permission from the site because it is the user reading their own screen.
+
+Three routes to a real checkout, in order of how much they prove:
+
+| Route | Reaches a login-gated checkout? | Credentials needed | Status |
+|---|---|---|---|
+| Browser extension | Yes — the user is already signed in | **None** | Built, needs the popup wired to the detectors |
+| `--saved` pages | Yes — the user saved what they were shown | **None** | Built (`scripts/audit_url.py --saved`) |
+| Crawler | No — stops at the sign-in page, by design | **None** | Built |
+
+### What "agentic" should mean here
+
+Worth building, in this order:
+
+1. **Reasoning about a page the rules cannot classify.** Layer 3 already
+   exists and is off by default. An agent reading a page and saying "this
+   decline wording attaches guilt, here is the sentence" is a real
+   improvement over a regex — *as a separate INDICATIVE finding*, never
+   upgrading a tier.
+2. **Planning a route through an unfamiliar funnel.** Discovery currently
+   matches button text against a fixed vocabulary. An agent could look at a
+   page and decide which control advances the purchase — which is exactly the
+   step that failed on the sandboxes.
+3. **Explaining a finding to a non-technical reader**, citing the CCPA clause.
+
+What it must NOT do: decide a finding's tier, press a control on the
+never-click list, or take an irreversible action. The evidence tiers are the
+only reason this tool's output can be defended, and a model that can promote
+its own guess to PROVABLE destroys that in one line.
+
 ## 4. What's left to build, honestly
 
 Ordered by what a judge would notice first.

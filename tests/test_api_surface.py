@@ -76,7 +76,7 @@ def test_dashboard_html_is_served_from_the_api_origin(client):
     r = client.get("/dashboard/")
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
-    assert "Dark Pattern Auditor" in r.text
+    assert "Ulterior" in r.text
 
 
 def test_html_responses_get_a_csp_that_permits_the_dashboard(client):
@@ -446,3 +446,28 @@ def test_demo_assets_are_not_cacheable_in_development():
                 f"{path} may be cached by a browser: "
                 f"{response.headers.get('cache-control')!r}"
             )
+
+
+def test_every_user_facing_surface_credits_the_team(client):
+    """The demo page, the dashboard and the API all carry the same name.
+
+    Three surfaces had three different names -- "Ulterior", "Dark Pattern
+    Auditor" and "Dark Pattern Shield" -- which reads to anyone outside the
+    project as three different tools. One name, one credit, asserted so it
+    cannot drift back apart as pages are edited.
+    """
+    for path in ("/demo/", "/dashboard/"):
+        html = client.get(path).text
+        assert "Ulterior" in html, f"{path} does not name the product"
+        assert "The Odyssey" in html, f"{path} does not credit the team"
+
+    assert client.get("/healthz").json() == {"status": "ok"}
+    from app.main import app as fastapi_app
+    assert fastapi_app.title == "Ulterior by The Odyssey"
+
+
+def test_the_extension_carries_the_same_name():
+    root = Path(__file__).parent.parent
+    import json as _json
+    manifest = _json.loads((root / "extension" / "manifest.json").read_text())
+    assert manifest["name"] == "Ulterior by The Odyssey", manifest["name"]

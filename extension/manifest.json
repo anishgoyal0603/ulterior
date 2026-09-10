@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Dark Pattern Shield",
+  "name": "Ulterior by The Odyssey",
   "version": "0.1.0",
   "description": "Flags CCPA-defined dark patterns (drip pricing, pre-ticked add-ons, fake urgency, confirm shaming) while you shop, in real time.",
   "permissions": ["storage", "activeTab", "scripting"],

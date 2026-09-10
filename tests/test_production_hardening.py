@@ -229,3 +229,40 @@ def test_production_rejects_short_api_keys(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@h/d?sslmode=require")
     with pytest.raises(config.ConfigError, match="brute-forceable"):
         config.validate()
+
+
+def test_a_demo_run_does_not_rate_limit_itself(client):
+    """The demo stopped mid-presentation with "Lost contact with the server
+    (429)". Nothing was lost: the page had rate-limited ITSELF.
+
+    Status polling runs every 900ms while an audit walks the funnel, and
+    neither that poll nor any static file matched a route rule -- so they
+    shared one 60-per-minute bucket with the stylesheets, the scripts and the
+    storefront inside the iframe. A page load, an iframe, two audits and one
+    refresh is about fifty requests. Two more runs and the demo dies in front
+    of whoever is watching.
+
+    This walks a realistic rehearsal and asserts none of it is refused.
+    """
+    for _ in range(3):
+        for path in ("/demo/", "/demo/demo.css", "/demo/demo.js",
+                     "/storefront-clean/cart.html", "/storefront/cart.html"):
+            assert client.get(path).status_code != 429, f"{path} was rate limited"
+
+    # Two audits' worth of polling, at 900ms over ~10s each.
+    for _ in range(30):
+        assert client.get("/demo-audit/999999").status_code != 429, (
+            "status polling was rate limited during a normal demo run"
+        )
+
+
+def test_the_expensive_endpoints_are_still_limited(client):
+    """The budgets were raised for cheap requests only. Launching a headless
+    browser for an unauthenticated caller is the thing the limiter exists for,
+    and it must still stop."""
+    from app import config
+    codes = [
+        client.post("/demo-audit", json={"adapter_name": "hosted_clean_demo"}).status_code
+        for _ in range(config.RATE_LIMIT_AUDIT_PER_MINUTE + 3)
+    ]
+    assert 429 in codes, "the public demo endpoint no longer has a limit"

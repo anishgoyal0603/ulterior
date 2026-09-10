@@ -128,6 +128,34 @@ _ROUTE_LIMITS = [
     # it. Sixty unauthenticated browser launches a minute is a denial of
     # service against the machine running the demo.
     ("POST", "/demo-audit", lambda: config.RATE_LIMIT_AUDIT_PER_MINUTE, 60, "POST:/demo-audit"),
+
+    # --- Everything below exists because the demo rate-limited ITSELF. -----
+    #
+    # The demo page polls for job status every 900ms while an audit runs, and
+    # neither that poll nor any static file matched a rule above -- so they
+    # all shared ONE default bucket of 60 requests a minute, per IP, with the
+    # stylesheets, the scripts and the storefront inside the iframe.
+    #
+    # Count a normal rehearsal: the page and its two assets, the iframe's
+    # storefront and its stylesheet, eleven polls for the first audit, the
+    # iframe reloading when you switch storefront, eleven more polls for the
+    # second, and one refresh because you wanted to see it fresh. That is
+    # roughly fifty. Two more runs and the demo stops with "Lost contact with
+    # the server (429)" in front of whoever is watching.
+    #
+    # The limiter exists to stop somebody launching headless browsers on this
+    # machine, or deleting audit records in bulk. Serving a stylesheet is not
+    # that, and asking "is the job done yet?" is not that either. Each now
+    # has a budget matched to what it actually costs.
+    #
+    # ORDER MATTERS: /dashboard/summary is a JSON API route that lives under
+    # the same prefix as the dashboard's static files, so it is matched first.
+    ("GET", "/dashboard/summary", lambda: config.RATE_LIMIT_POLL_PER_MINUTE, 60, "GET:/summary"),
+    ("GET", "/demo-audit", lambda: config.RATE_LIMIT_POLL_PER_MINUTE, 60, "GET:poll"),
+    ("GET", "/audits", lambda: config.RATE_LIMIT_POLL_PER_MINUTE, 60, "GET:poll"),
+    ("GET", "/demo/", lambda: config.RATE_LIMIT_STATIC_PER_MINUTE, 60, "GET:static"),
+    ("GET", "/dashboard/", lambda: config.RATE_LIMIT_STATIC_PER_MINUTE, 60, "GET:static"),
+    ("GET", "/storefront", lambda: config.RATE_LIMIT_STATIC_PER_MINUTE, 60, "GET:static"),
 ]
 
 

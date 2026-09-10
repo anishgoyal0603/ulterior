@@ -47,6 +47,8 @@ def generate_audit_report(site_name: str, violations: list, output_path: str):
     story = []
 
     story.append(Paragraph(f"Dark Pattern Observation Report — {site_name}", title_style))
+    story.append(Paragraph("Produced by Ulterior, built by team The Odyssey · SIH26199",
+                           styles["Italic"]))
     story.append(Paragraph(
         f"Generated {datetime.now().strftime('%d %b %Y, %H:%M')} &nbsp;|&nbsp; "
         f"Assessed against India's Guidelines for Prevention and Regulation of "

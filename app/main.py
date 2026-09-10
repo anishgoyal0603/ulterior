@@ -71,7 +71,7 @@ async def lifespan(_app: FastAPI):
     started it, and it cannot be started without that stop being registered.
     """
     init_db()
-    logger.info("Dark Pattern Auditor starting - %s", config.startup_report())
+    logger.info("Ulterior by The Odyssey starting - %s", config.startup_report())
 
     # Say it loudly, at the only moment it can still be fixed calmly.
     broken = missing_static_assets()
@@ -101,7 +101,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     lifespan=lifespan,
-    title="Dark Pattern Auditor",
+    title="Ulterior by The Odyssey",
     description="Automated CCPA (India) Dark Patterns Guidelines, 2023 compliance auditor "
                 "for e-commerce, travel, and other consumer-facing web funnels — SIH26199",
     version="0.1.0",
@@ -380,7 +380,7 @@ def get_demo_audit(job_id: int = PathParam(..., ge=1, lt=2**63, description="Aud
 
 @app.get("/")
 def root():
-    return {"status": "ok", "service": "Dark Pattern Auditor"}
+    return {"status": "ok", "service": "Ulterior by The Odyssey"}
 
 
 # The dashboard is served from the API's OWN origin rather than a separate
