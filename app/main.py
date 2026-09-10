@@ -72,6 +72,18 @@ async def lifespan(_app: FastAPI):
     """
     init_db()
     logger.info("Dark Pattern Auditor starting - %s", config.startup_report())
+
+    # Say it loudly, at the only moment it can still be fixed calmly.
+    broken = missing_static_assets()
+    if broken:
+        logger.error("=" * 70)
+        logger.error("THE DEMO PAGES WILL NOT RENDER CORRECTLY. Files are missing:")
+        for item in broken:
+            logger.error("    %s", item)
+        logger.error("")
+        logger.error("Re-extract the project zip over this folder, or run:")
+        logger.error("    git checkout -- demo dashboard fixtures")
+        logger.error("=" * 70)
     try:
         removed = purge_expired()
         if removed:
@@ -382,10 +394,36 @@ def root():
 # Mounted LAST so it can never shadow an API route: FastAPI matches routes in
 # definition order, and a mount at "/dashboard" registered earlier would
 # swallow anything beneath that prefix.
+class _NoStoreStaticFiles(StaticFiles):
+    """Static files a browser is not allowed to cache, outside production.
+
+    The demo page rendered as unstyled Times New Roman on a machine where the
+    server was serving demo.css perfectly well: the browser was replaying a
+    cached entry from an earlier build of this project, when the stylesheet
+    was inline and that file did not exist at all.
+
+    Nothing in these URLs carries a version, so a stale entry can outlive the
+    fix indefinitely -- and the failure looks IDENTICAL to the bug that was
+    already fixed, which sends everyone hunting in the wrong place. A few
+    kilobytes per reload is a trivial price for a page whose entire job is
+    being shown to somebody who has not seen it before.
+
+    Production keeps normal caching: there the assets are fetched once by many
+    people, not repeatedly by one person watching them change.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if not config.IS_PRODUCTION:
+            response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
+        return response
+
+
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DASHBOARD_DIR = os.path.join(_ROOT, "dashboard")
 if os.path.isdir(_DASHBOARD_DIR):
-    app.mount("/dashboard", StaticFiles(directory=_DASHBOARD_DIR, html=True), name="dashboard")
+    app.mount("/dashboard", _NoStoreStaticFiles(directory=_DASHBOARD_DIR, html=True),
+              name="dashboard")
 
 # The public demo: a storefront the auditor can actually walk over HTTP, next
 # to the findings it produces. Serving the fixtures here rather than opening
@@ -397,9 +435,49 @@ _DEMO_DIR = os.path.join(_ROOT, "demo")
 _STOREFRONT_DIR = os.path.join(_ROOT, "fixtures", "ecommerce_dark")
 _STOREFRONT_CLEAN_DIR = os.path.join(_ROOT, "fixtures", "ecommerce_clean")
 if os.path.isdir(_DEMO_DIR):
-    app.mount("/demo", StaticFiles(directory=_DEMO_DIR, html=True), name="demo")
+    app.mount("/demo", _NoStoreStaticFiles(directory=_DEMO_DIR, html=True), name="demo")
 if os.path.isdir(_STOREFRONT_DIR):
-    app.mount("/storefront", StaticFiles(directory=_STOREFRONT_DIR, html=True), name="storefront")
+    app.mount("/storefront", _NoStoreStaticFiles(directory=_STOREFRONT_DIR, html=True),
+              name="storefront")
 if os.path.isdir(_STOREFRONT_CLEAN_DIR):
-    app.mount("/storefront-clean", StaticFiles(directory=_STOREFRONT_CLEAN_DIR, html=True),
+    app.mount("/storefront-clean", _NoStoreStaticFiles(directory=_STOREFRONT_CLEAN_DIR, html=True),
               name="storefront_clean")
+
+
+# Every file a demo surface needs in order to look like itself.
+#
+# The mounts above are all guarded by `os.path.isdir`, which silently skips a
+# missing folder -- and a folder that EXISTS but lost a file to a partial
+# extraction is worse still: the HTML serves, the stylesheet 404s, and the
+# page renders as unstyled Times New Roman with a broken frame where the
+# storefront should be. Nothing in the terminal says a word.
+#
+# That is a bad way to discover a problem thirty seconds before a demo, so
+# the server checks its own assets at startup and names the missing file.
+_REQUIRED_ASSETS = {
+    "demo": (_DEMO_DIR, ("index.html", "demo.css", "demo.js")),
+    "dashboard": (_DASHBOARD_DIR, ("index.html", "dashboard.css", "dashboard.js")),
+    "storefront": (_STOREFRONT_DIR, ("listing.html", "cart.html", "checkout.html", "shop.css")),
+    "storefront-clean": (_STOREFRONT_CLEAN_DIR, ("listing.html", "cart.html", "checkout.html")),
+}
+
+
+def missing_static_assets() -> List[str]:
+    """Files a demo surface needs and does not have. Empty list means healthy.
+
+    A zero-byte file counts as missing: an interrupted copy leaves one behind,
+    and it fails exactly like an absent file while looking present in a
+    directory listing.
+    """
+    missing = []
+    for surface, (directory, names) in _REQUIRED_ASSETS.items():
+        if not os.path.isdir(directory):
+            missing.append(f"{surface}: the whole folder is absent ({directory})")
+            continue
+        for name in names:
+            path = os.path.join(directory, name)
+            if not os.path.isfile(path):
+                missing.append(f"{surface}: {name} is missing")
+            elif os.path.getsize(path) == 0:
+                missing.append(f"{surface}: {name} is empty (0 bytes)")
+    return missing

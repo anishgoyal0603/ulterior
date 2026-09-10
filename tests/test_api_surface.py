@@ -398,3 +398,51 @@ def test_launchers_give_pip_enough_time_on_a_slow_connection():
             f"{name} leaves pip on its 15-second default timeout"
         )
         assert "--retries" in text, f"{name} does not retry a dropped download"
+
+
+def test_the_server_reports_missing_demo_assets_instead_of_rendering_wrong(tmp_path, monkeypatch):
+    """A missing stylesheet must be a line in the terminal, not a mystery.
+
+    The demo page rendered as unstyled Times New Roman with a broken frame
+    where the storefront should be, and nothing anywhere said why. The mounts
+    are guarded by os.path.isdir, which silently skips an absent folder -- and
+    a folder that merely LOST a file to a partial extraction is worse, because
+    the HTML still serves and only the stylesheet 404s.
+
+    Discovering that thirty seconds before a demo is the failure this test
+    exists to prevent.
+    """
+    from app import main
+
+    assert main.missing_static_assets() == [], (
+        "this repository is itself missing a demo asset: "
+        + "; ".join(main.missing_static_assets())
+    )
+
+    empty = tmp_path / "demo"
+    empty.mkdir()
+    (empty / "index.html").write_text("x")
+    (empty / "demo.css").write_text("")          # the interrupted-copy case
+    monkeypatch.setitem(main._REQUIRED_ASSETS, "demo",
+                        (str(empty), ("index.html", "demo.css", "demo.js")))
+    reported = main.missing_static_assets()
+    assert any("demo.js is missing" in r for r in reported), reported
+    assert any("demo.css is empty" in r for r in reported), reported
+
+
+def test_demo_assets_are_not_cacheable_in_development():
+    """A stale cache can serve a page that was broken two builds ago, and the
+    symptom is identical to the bug that was already fixed -- which sends
+    everyone hunting in the wrong place. Development sends no-store so that
+    cannot happen; production keeps normal caching."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    with TestClient(app) as client:
+        for path in ("/demo/demo.css", "/demo/demo.js", "/dashboard/dashboard.css"):
+            response = client.get(path)
+            assert response.status_code == 200, f"{path} -> {response.status_code}"
+            assert "no-store" in response.headers.get("cache-control", ""), (
+                f"{path} may be cached by a browser: "
+                f"{response.headers.get('cache-control')!r}"
+            )
