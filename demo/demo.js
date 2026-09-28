@@ -46,27 +46,57 @@ function renderFindings(violations) {
 
   violations.forEach((v) => {
     const tier = (v.evidence && v.evidence.evidence_tier) || "indicative";
-    const card = el("div", "finding");
+    const safeTier = TIERS.includes(tier) ? tier : "indicative";
+    const card = el("div", "finding is-" + safeTier);
     const top = el("div", "top");
     top.append(
       el("span", "code", v.pattern_code),
       el("span", "name", v.pattern_name),
-      el("span", "tier tier-" + (TIERS.includes(tier) ? tier : "indicative"), tier),
-      el("span", "step", v.step_name + " · " + Math.round(v.confidence * 100) + "%")
+      el("span", "tier tier-" + safeTier, tier)
     );
-    card.append(top, el("p", null, v.explanation));
+    card.append(
+      top,
+      el("p", "step", v.step_name + " · " + Math.round(v.confidence * 100) + "% confidence"),
+      el("p", "expl", v.explanation)
+    );
 
     // The evidence object is the point of the whole tool: a reader can check
     // the claim without trusting the tool. Showing it is not a debug affordance.
+    //
+    // One row per field rather than a JSON dump: "disclosed_price 299.0" next
+    // to "final_total 457.0" is something a judge reads in a glance, where the
+    // same data as a brace-and-quote blob reads as a log file. Every value is
+    // still set with textContent -- it came from the audited site.
     if (v.evidence && Object.keys(v.evidence).length) {
       const shown = Object.assign({}, v.evidence);
       delete shown.evidence_tier;   // already shown as the badge above
-      if (Object.keys(shown).length) {
-        card.append(el("div", "evidence", JSON.stringify(shown, null, 1)));
+      const keys = Object.keys(shown);
+      if (keys.length) {
+        const ev = el("div", "evidence");
+        keys.forEach((k) => {
+          const row = el("div", "ev-row");
+          // "disclosed price", not "disclosed_price": the same field, readable, and
+          // it wraps between words instead of mid-identifier.
+          row.append(el("span", "ev-key", k.replace(/_/g, " ")),
+                     el("span", "ev-val", evidenceText(shown[k])));
+          ev.append(row);
+        });
+        card.append(ev);
       }
     }
     box.append(card);
   });
+}
+
+/** A field's value as plain text: lists of words read as a list, anything
+ *  structured falls back to compact JSON so nothing is ever hidden. */
+function evidenceText(value) {
+  if (value === null || value === undefined) return "—";
+  if (Array.isArray(value) && value.every((x) => typeof x !== "object" || x === null)) {
+    return value.join(", ");
+  }
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
 }
 
 function setStatus(text, isError) {
@@ -184,15 +214,27 @@ async function runAudit() {
   }
 }
 
-$("run").addEventListener("click", runAudit);
-$("target").addEventListener("change", () => {
-  const dark = $("target").value === "hosted_dark_demo";
+/** Point the frame, its label and its address bar at one shop. All three move
+ *  together: a stale address under a swapped page is how a demo accidentally
+ *  claims to have audited the wrong site. */
+function showShop(dark) {
   const path = dark ? "/storefront/cart.html" : "/storefront-clean/cart.html";
-  $("frame").src = path;
+  if ($("frame").getAttribute("src") !== path) $("frame").src = path;
   $("frame-label").textContent = dark ? "ShopMart checkout" : "HonestCart checkout";
   // The address field shows the real URL being framed, so the panel cannot
   // drift into looking like a mockup of a shop rather than a shop.
   $("frame-url").textContent = location.host + path;
+}
+
+$("run").addEventListener("click", runAudit);
+$("target").addEventListener("change", () => {
+  showShop($("target").value === "hosted_dark_demo");
 });
 
-$("frame-url").textContent = location.host + "/storefront/cart.html";
+// The landing page links here as /demo/?shop=clean from its "HonestCart"
+// chip. The parameter only PRESELECTS one of the two server-defined shops --
+// it is compared against a fixed word, never used as a value, and it never
+// starts an audit: a link should not launch a browser on someone's behalf.
+const wantsClean = new URLSearchParams(location.search).get("shop") === "clean";
+if (wantsClean) $("target").value = "hosted_clean_demo";
+showShop($("target").value === "hosted_dark_demo");

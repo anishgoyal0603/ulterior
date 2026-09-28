@@ -154,6 +154,11 @@ _ROUTE_LIMITS = [
     ("GET", "/demo-audit", lambda: config.RATE_LIMIT_POLL_PER_MINUTE, 60, "GET:poll"),
     ("GET", "/audits", lambda: config.RATE_LIMIT_POLL_PER_MINUTE, 60, "GET:poll"),
     ("GET", "/demo/", lambda: config.RATE_LIMIT_STATIC_PER_MINUTE, 60, "GET:static"),
+    # The landing page's stylesheet and script. Same reasoning as the demo's:
+    # a first-time visitor loading two assets is not the abuse this limiter
+    # exists to stop, and sharing the 60/minute default with every other
+    # unmatched path would let a busy page-view starve the API.
+    ("GET", "/landing/", lambda: config.RATE_LIMIT_STATIC_PER_MINUTE, 60, "GET:static"),
     ("GET", "/dashboard/", lambda: config.RATE_LIMIT_STATIC_PER_MINUTE, 60, "GET:static"),
     ("GET", "/storefront", lambda: config.RATE_LIMIT_STATIC_PER_MINUTE, 60, "GET:static"),
 ]

@@ -8,7 +8,7 @@ from typing import List
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi import Path as PathParam, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -378,8 +378,26 @@ def get_demo_audit(job_id: int = PathParam(..., ge=1, lt=2**63, description="Aud
     return _to_job_out(job)
 
 
-@app.get("/")
+_LANDING_INDEX = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              "landing", "index.html")
+
+
+@app.get("/", include_in_schema=False)
 def root():
+    """The front door.
+
+    This used to return {"status": "ok", ...} -- which meant the first thing a
+    judge, a pilot user or a professor saw at the deployed address was a line
+    of raw JSON. The public URL is the product's first impression, so it now
+    serves the landing page.
+
+    Nothing that needs a machine-readable liveness answer loses one: /healthz
+    has always been the probe (see its docstring), and it is unchanged. If the
+    landing folder is ever missing from a deployment, this falls back to the
+    old JSON rather than a 500, so the root still answers.
+    """
+    if os.path.isfile(_LANDING_INDEX):
+        return FileResponse(_LANDING_INDEX, media_type="text/html")
     return {"status": "ok", "service": "Ulterior by The Odyssey"}
 
 
@@ -431,6 +449,13 @@ if os.path.isdir(_DASHBOARD_DIR):
 # the identical code path it would against a live commercial site, including
 # DNS, redirects, caching and every other difference between fetching a page
 # and reading a file off disk.
+# The landing page's own stylesheet and script. Its HTML is served at "/" by
+# root() above; this mount only carries the assets, under a prefix that cannot
+# collide with any API route.
+_LANDING_DIR = os.path.join(_ROOT, "landing")
+if os.path.isdir(_LANDING_DIR):
+    app.mount("/landing", _NoStoreStaticFiles(directory=_LANDING_DIR), name="landing")
+
 _DEMO_DIR = os.path.join(_ROOT, "demo")
 _STOREFRONT_DIR = os.path.join(_ROOT, "fixtures", "ecommerce_dark")
 _STOREFRONT_CLEAN_DIR = os.path.join(_ROOT, "fixtures", "ecommerce_clean")
@@ -455,6 +480,7 @@ if os.path.isdir(_STOREFRONT_CLEAN_DIR):
 # That is a bad way to discover a problem thirty seconds before a demo, so
 # the server checks its own assets at startup and names the missing file.
 _REQUIRED_ASSETS = {
+    "landing": (_LANDING_DIR, ("index.html", "landing.css", "landing.js")),
     "demo": (_DEMO_DIR, ("index.html", "demo.css", "demo.js")),
     "dashboard": (_DASHBOARD_DIR, ("index.html", "dashboard.css", "dashboard.js")),
     "storefront": (_STOREFRONT_DIR, ("listing.html", "cart.html", "checkout.html", "shop.css")),

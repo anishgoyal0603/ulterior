@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ulterior — catch dark patterns before the shopper pays</title>
+<meta name="description" content="Ulterior walks a real checkout the way a shopper does and flags all 13 dark patterns banned by India's CCPA Guidelines, 2023 — with the page's own words as proof.">
+<!--
+  Same-origin assets only. The app's Content-Security-Policy is
+  default-src 'none' with no font-src, so NO web font can load here -- not
+  Google Fonts and not a self-hosted one either. The type is the platform's
+  own UI face (Segoe UI on Windows, SF on Apple, Roboto on Android), which is
+  also why the page paints instantly with no font flash.
+-->
+<link rel="stylesheet" href="/landing/landing.css">
+</head>
+<body>
+
+<!-- ============================ announcement ============================ -->
+<div class="announce">
+  <div class="wrap announce-in">
+    <span class="announce-pill">New rule</span>
+    <p>From <strong>1 Jan 2027</strong>, India's e-commerce platforms must self-audit for dark patterns every year.</p>
+    <a class="announce-link" href="#why-now">Why it matters
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg></a>
+  </div>
+</div>
+
+<!-- ================================ nav ================================= -->
+<header class="nav" id="top">
+  <div class="wrap nav-in">
+    <a class="brand" href="/" aria-label="Ulterior home">
+      <span class="logo-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M7.5 5.5v6.5a4.5 4.5 0 0 0 9 0V5.5"/><circle cx="12" cy="11.2" r="1.9"/></svg>
+      </span>
+      <span class="brand-text">Ulterior<small>by The Odyssey</small></span>
+    </a>
+
+    <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-menu">
+      <span class="sr-only">Menu</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+
+    <nav class="nav-menu" id="nav-menu" aria-label="Main">
+      <a href="#how">How it works</a>
+      <a href="#patterns">13 patterns</a>
+      <a href="#proof">Proof</a>
+      <a href="#extension">Extension</a>
+      <a class="btn btn-ghost" href="/dashboard/">Dashboard</a>
+      <a class="btn btn-primary" href="/demo/">Run a live audit</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<!-- ================================ hero ================================ -->
+<section class="hero">
+  <div class="wrap hero-in">
+
+    <div class="hero-copy">
+      <p class="chip">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.6-7 9-4-1.4-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
+        Built for India's Dark Patterns Guidelines, 2023
+      </p>
+      <h1>Catch the trick <mark>before</mark> the shopper pays.</h1>
+      <p class="lede">Ulterior walks a real checkout the way a shopper does &mdash; listing, product, cart,
+        payment &mdash; and flags all 13 dark patterns India has banned. Every finding comes with the
+        page's own words as proof.</p>
+
+      <div class="cta-row">
+        <a class="btn btn-primary btn-lg" href="/demo/">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+          Run a live audit <span class="btn-meta">10 sec</span>
+        </a>
+        <a class="btn btn-soft btn-lg" href="/dashboard/">Audit your own site
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg></a>
+      </div>
+
+      <div class="try">
+        <span class="try-label">Try a demo shop:</span>
+        <a class="try-chip try-dark" href="/demo/">
+          <span class="dot" aria-hidden="true"></span>ShopMart <em>tricks inside</em></a>
+        <a class="try-chip try-clean" href="/demo/?shop=clean">
+          <span class="dot" aria-hidden="true"></span>HonestCart <em>plays fair</em></a>
+      </div>
+
+      <ul class="trust" aria-label="What Ulterior does">
+        <li><strong>13 of 13</strong><span>CCPA patterns covered</span></li>
+        <li><strong>~10 sec</strong><span>to walk a checkout</span></li>
+        <li><strong>0</strong><span>false alarms on 7 honest shops</span></li>
+        <li><strong>Offline</strong><span>by default &mdash; AI is opt&#8209;in</span></li>
+      </ul>
+    </div>
+
+    <!--
+      The hero visual is the REAL demo checkout, line for line: the ShopMart
+      fixture in fixtures/ecommerce_dark. Every number and every quote below is
+      what the detectors actually output on that shop, so a visitor who presses
+      "Run a live audit" sees these same findings appear -- nothing here is a
+      marketing mock-up of results the product does not produce.
+    -->
+    <div class="hero-visual" aria-label="Example: the ShopMart demo checkout with the findings Ulterior raises on it">
+      <div class="receipt">
+        <div class="receipt-bar">
+          <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="receipt-addr">shopmart &middot; checkout</span>
+        </div>
+        <div class="receipt-body">
+          <p class="receipt-title">Checkout</p>
+          <div class="line"><span>Premium Phone Case</span><b>&#8377;299</b></div>
+          <div class="line is-flag f1">
+            <span>Order Protection Insurance</span><b>&#8377;49</b>
+            <em class="flag"><i>DP-02</i> Pre-ticked &mdash; added without asking</em>
+          </div>
+          <div class="line is-flag f2"><span>Delivery Fee</span><b>&#8377;49</b></div>
+          <div class="line is-flag f2"><span>Platform Fee</span><b>&#8377;60</b></div>
+          <div class="line total"><span>Total</span><b>&#8377;457</b></div>
+          <div class="verdict f3">
+            <span class="verdict-code">DP-08 &middot; Drip pricing &middot; provable</span>
+            <p>Shown <strong>&#8377;299</strong> on the listing. Charged <strong>&#8377;457</strong>.
+              &#8377;158 in charges were not shown upfront.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="float float-a f4">
+        <span class="float-code">DP-01 &middot; False urgency</span>
+        <p>Countdown read <b>00:04:58</b>. After a reload: <b>00:04:59</b>.</p>
+        <small>It went up.</small>
+      </div>
+      <div class="float float-b f5">
+        <span class="float-code">DP-03 &middot; Confirm shaming</span>
+        <p>&ldquo;No thanks, I don't want my order protected and accept all risk&rdquo;</p>
+      </div>
+      <p class="hero-note">6 findings &middot; 5 patterns &middot; on the real demo shop.
+        <a href="/demo/">Run it yourself &rarr;</a></p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 13 patterns ============================= -->
+<section class="section" id="patterns">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="eyebrow">What it catches</p>
+      <h2>All 13 dark patterns India has banned</h2>
+      <p class="section-sub">Named in the CCPA's <em>Guidelines for Prevention and Regulation of Dark
+        Patterns, 2023</em>. Ulterior has a detector for every one &mdash; and each is capped by how
+        strong its evidence can ever be.</p>
+    </div>
+
+    <div class="pgrid">
+      <article class="pcard t-rose">
+        <span class="picon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9.5 2h5"/></svg></span>
+        <span class="pcode">DP-01</span><h3>False Urgency</h3>
+        <p>Countdowns and &ldquo;only 2 left&rdquo; that aren't true.</p>
+        <span class="ptier tier-corr">corroborated</span>
+      </article>
+      <article class="pcard t-peach">
+        <span class="picon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l2.4 10.2a1 1 0 0 0 1 .8h8.9a1 1 0 0 0 1-.8L20 8H6.2"/><circle cx="9" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/><path d="M13 2.5v5M10.5 5h5"/></svg></span>
+        <span class="pcode">DP-02</span><h3>Basket Sneaking</h3>
+        <p>Insurance, donations or add-ons put in your cart without asking.</p>
+        <span class="ptier tier-prov">provable</span>
+      </article>
+      <article class="pcard t-sun">
+        <span class="picon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 16.2c1.9-1.6 5.1-1.6 7 0M9 9.5h.01M15 9.5h.01"/></svg></span>
+        <span class="pcode">DP-03</span><h3>Confirm Shaming</h3>
+        <p>&ldquo;No thanks, I like paying full price&rdquo; &mdash; guilt written into the button.</p>
+        <span class="ptier tier-ind">indicative</span>
+      </article>
+      <article class="pcard t-lav">
+        <span class="picon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4M12 15v2"/></svg></span>
+        <span class="pcode">DP-04</span><h3>Forced Action</h3>
+        <p>Making you share data or sign up for something unrelated to finish.</p>
+        <span class="ptier tier-prov">provable</span>
+      </article>
+      <article class="pcard t-sky">
+        <span class="picon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 2l3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h12"/><path d="M7 22l-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/></svg></span>
+        <span class="pcode">DP-05</span><h3>Subscription Trap</h3>
+        <p>One click to join. A maze to cancel.</p>
+        <span class="ptier tier-corr">corroborated</span>
+      </article>
+      <article class="pcard t-mint">
+        <span class="picon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.9 10.9 0 0 1 12 5c6 0 9.5 7 9.5 7a17 17 0 0 1-3 3.9M6.1 6.1A17.3 17.3 0 0 0 2.5 12S6 19 12 19a10 10 0 0 0 4.9-1.3"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></span>
+        <span class="pcode">DP-06</span><h3>Interface Interference</h3>
+        <p>A bright &ldquo;Accept&rdquo; next to a faint, tiny &ldquo;Decline&rdquo;.</p>
+        <span class="ptier tier-corr">corroborated</span>
+      </article>
+      <article class="pcard t-rose">
+        <span class="picon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3l4 4-4 4"/><path d="M20 7H4"/><path d="M8 21l-4-4 4-4"/><path d="M4 17h16"/></svg></span>
+        <span class="pcode">DP-07</span><h3>Bait and Switch</h3>
+        <p>A button promises one price. The next page charges another.</p>
+        <span class="ptier tier-corr">corroborated</span>
+      </article>
+      <article class="pcard t-peach">
+        <span class="picon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h3"/></svg></span>
+        <span class="pcode">DP-08</span><h3>Drip Pricing</h3>
+        <p>A low price up front. Fees that appear one page at a time.</p>
+        <span class="ptier tier-prov">provable</span>
+      </article>
+      <article class="pcard t-sun">
+        <span class="picon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12"/></svg></span>
+        <span class="pcode">DP-09</span><h3>Disguised Advertisement</h3>
+        <p>An &ldquo;ad&rdquo; label so faint or tiny that nobody can read it.</p>
+        <span class="ptier tier-corr">corroborated</span>
+      </article>
+      <article class="pcard t-lav">
+        <span class="picon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></span>
+        <span class="pcode">DP-10</span><h3>Nagging</h3>
+        <p>You said no. It asks again. And again.</p>
+        <span class="ptier tier-prov">provable</span>
+      </article>
+      <article class="pcard t-sky">
+        <span class="picon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M9.5 8.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.4M12 14.5h.01"/></svg></span>
+        <span class="pcode">DP-11</span><h3>Trick Wording</h3>
+        <p>Double negatives where ticking &ldquo;yes&rdquo; actually means &ldquo;no&rdquo;.</p>
+        <span class="ptier tier-corr">corroborated</span>
+      </article>
+      <article class="pcard t-mint">
+        <span class="picon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg></span>
+        <span class="pcode">DP-12</span><h3>SaaS Billing</h3>
+        <p>A paid plan or recurring charge selected for you before you choose.</p>
+        <span class="ptier tier-prov">provable</span>
+      </article>
+      <article class="pcard t-rose">
+        <span class="picon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></span>
+        <span class="pcode">DP-13</span><h3>Rogue Malware</h3>
+        <p>Fake &ldquo;virus found&rdquo; alerts pushing you to download something.</p>
+        <span class="ptier tier-ind">indicative</span>
+      </article>
+
+      <a class="pcard pcard-cta" href="/demo/">
+        <span class="pcta-kicker">See them caught live</span>
+        <strong>Watch Ulterior walk a real checkout and raise these findings in about ten seconds.</strong>
+        <span class="pcta-go">Run a live audit
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg></span>
+      </a>
+    </div>
+
+    <div class="tier-key">
+      <span><i class="k-prov"></i><b>Provable</b> &mdash; arithmetic or page state. Capped at 100%.</span>
+      <span><i class="k-corr"></i><b>Corroborated</b> &mdash; two signals had to agree. Capped at 90%.</span>
+      <span><i class="k-ind"></i><b>Indicative</b> &mdash; a human should confirm. Capped at 60%.</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ how it works ============================ -->
+<section class="section section-soft" id="how">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="eyebrow">How it works</p>
+      <h2>From a link to a verdict in four steps</h2>
+    </div>
+
+    <ol class="steps">
+      <li class="step">
+        <span class="step-n">1</span>
+        <span class="step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M6.5 6.5h.01M9.5 6.5h.01"/></svg></span>
+        <h3>Walk</h3>
+        <p>A real Chromium opens the shop and clicks through listing, product, cart and checkout.
+          It will never press Pay, Place order, Subscribe or Sign in.</p>
+      </li>
+      <li class="step">
+        <span class="step-n">2</span>
+        <span class="step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>
+        <h3>Detect</h3>
+        <p>Four detectors read what the shopper saw: prices and page state, the journey across pages,
+          on-screen size and contrast, and the wording.</p>
+      </li>
+      <li class="step">
+        <span class="step-n">3</span>
+        <span class="step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-6"/></svg></span>
+        <h3>Score</h3>
+        <p>Each finding gets an evidence tier with a hard ceiling &mdash; 100%, 90% or 60%.
+          No detector is allowed to claim more than its evidence can carry.</p>
+      </li>
+      <li class="step">
+        <span class="step-n">4</span>
+        <span class="step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg></span>
+        <h3>Report</h3>
+        <p>A PDF report, a live dashboard and a browser extension. A page it could not read is
+          reported as inconclusive &mdash; never as clean.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- =============================== proof =============================== -->
+<section class="section" id="proof">
+  <div class="wrap split">
+    <div class="split-copy">
+      <p class="eyebrow">Evidence, not a label</p>
+      <h2>Every finding comes with receipts</h2>
+      <p class="section-sub">A label on its own can't be checked. So Ulterior keeps what the page
+        actually showed, and anyone can reopen it and see for themselves.</p>
+      <ul class="checks">
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>The page's own words, quoted exactly</li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>The step it happened on &mdash; listing, cart or checkout</li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>The numbers behind it, not just a score</li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>A screenshot of the page in the PDF report</li>
+      </ul>
+
+      <div class="verdicts">
+        <div class="vcard v-find"><b>Findings</b><span>Patterns found, each with its proof.</span></div>
+        <div class="vcard v-clean"><b>Clean</b><span>Walked every page. Found nothing.</span></div>
+        <div class="vcard v-inc"><b>Inconclusive</b><span>Couldn't read a page &mdash; so it won't say clean.</span></div>
+      </div>
+    </div>
+
+    <!-- Verbatim detector output from the ShopMart demo shop (see the note on the hero). -->
+    <figure class="sample">
+      <div class="sample-card">
+        <div class="sample-top">
+          <span class="s-code">DP-08</span>
+          <span class="s-name">Drip Pricing</span>
+          <span class="s-tier">provable</span>
+        </div>
+        <p class="s-step">listing &rarr; checkout &middot; 100% confidence</p>
+        <p class="s-expl">Price disclosed at 'listing' was &#8377;299.0, but the final total at 'checkout'
+          is &#8377;457.0 &mdash; &#8377;158.0 in charges were not shown upfront.</p>
+        <dl class="s-evidence">
+          <div><dt>disclosed_price</dt><dd>299.0</dd></div>
+          <div><dt>final_total</dt><dd>457.0</dd></div>
+          <div><dt>hidden_amount</dt><dd>158.0</dd></div>
+          <div><dt>undisclosed_line_items</dt><dd>Order Protection Insurance, Delivery Fee, Platform Fee</dd></div>
+        </dl>
+      </div>
+      <figcaption>Exactly what the auditor returns on the ShopMart demo shop.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================ who it's for ============================ -->
+<section class="section section-soft" id="who">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="eyebrow">Who it's for</p>
+      <h2>One audit. Three people protected.</h2>
+    </div>
+    <div class="who">
+      <article class="wcard w-mint">
+        <span class="wicon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9l1.5-5h15L21 9"/><path d="M4 9v11h16V9"/><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/><path d="M10 20v-5h4v5"/></svg></span>
+        <p class="wkicker">For platforms</p>
+        <h3>Pass your yearly self-audit with evidence.</h3>
+        <p>From 1 January 2027 the law asks for a yearly self-audit and a displayed certificate.
+          Run Ulterior on every release &mdash; a pattern that ships on a Tuesday is caught on Tuesday.</p>
+        <a class="wlink" href="/dashboard/">Open the dashboard
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg></a>
+      </article>
+      <article class="wcard w-peach">
+        <span class="wicon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l1 14H5z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg></span>
+        <p class="wkicker">For shoppers</p>
+        <h3>See the trick while you shop.</h3>
+        <p>The Chrome extension flags six patterns in its popup, inside your own signed-in session.
+          It never asks for a password and makes no network calls at all.</p>
+        <a class="wlink" href="#extension">Get the extension
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg></a>
+      </article>
+      <article class="wcard w-lav">
+        <span class="wicon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M7 21h10M5 7h14"/><path d="M5 7l-3 6a3 3 0 0 0 6 0zM19 7l-3 6a3 3 0 0 0 6 0z"/></svg></span>
+        <p class="wkicker">For regulators &amp; researchers</p>
+        <h3>Check a declaration, don't just file it.</h3>
+        <p>Run the same audit on any declared-compliant checkout and get findings you can reopen,
+          quote and verify &mdash; the same way, every time.</p>
+        <a class="wlink" href="/dashboard/">See the 13-pattern coverage
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg></a>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== why now =============================== -->
+<section class="section section-dark" id="why-now">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="eyebrow">Why now</p>
+      <h2>Declarations are self-reported. Nothing checks them.</h2>
+    </div>
+    <div class="stats">
+      <div class="stat"><strong>26</strong><span>platforms declared themselves free of dark patterns in November 2025</span></div>
+      <div class="stat stat-hot"><strong>21 of 26</strong><span>still showed live dark patterns in an independent test</span></div>
+      <div class="stat"><strong>&#8377;20 lakh</strong><span>in CCPA penalties across 9 platforms, as of August 2026</span></div>
+      <div class="stat"><strong>1 Jan 2027</strong><span>a yearly self-audit and displayed certificate become mandatory</span></div>
+    </div>
+    <p class="sources">Sources:
+      <a href="https://www.pib.gov.in/PressReleasePage.aspx?PRID=2191948" target="_blank" rel="noopener noreferrer">PIB, 20 Nov 2025</a> &middot;
+      <a href="https://www.medianama.com/2025/11/223-dark-pattern-filings-ccpa-gaps-indias-consumer-protection-framework/" target="_blank" rel="noopener noreferrer">LocalCircles via MediaNama, Nov 2025</a> &middot;
+      <a href="https://www.business-standard.com/industry/news/ccpa-fines-indigo-zepto-bookmyshow-dark-patterns-quick-commerce-penalty-126080600580_1.html" target="_blank" rel="noopener noreferrer">Rajya Sabha reply, 6 Aug 2026</a> &middot;
+      <a href="https://taxguru.in/corporate-law/consumer-protection-commerce-amendment-rules-2026.html" target="_blank" rel="noopener noreferrer">G.S.R. 789(E), 9 Sep 2026</a>
+    </p>
+  </div>
+</section>
+
+<!-- ============================= extension ============================== -->
+<section class="section" id="extension">
+  <div class="wrap split split-rev">
+    <div class="split-copy">
+      <p class="eyebrow">Ulterior for Chrome</p>
+      <h2>A second pair of eyes at checkout</h2>
+      <p class="section-sub">It runs in your own browser session, so it sees exactly what you see
+        &mdash; and it never needs your password.</p>
+      <ul class="checks">
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Flags the six patterns visible on a single page: false urgency, basket sneaking, confirm shaming, drip pricing, trick wording and SaaS billing</li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Zero network calls &mdash; nothing leaves your browser</li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>Chrome Manifest V3, code on GitHub</li>
+      </ul>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/anishgoyal0603/ulterior/tree/main/extension" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Get it from GitHub</a>
+      </div>
+      <p class="fine">Not on the Chrome Web Store yet. To install: download the <code>extension</code> folder,
+        open <code>chrome://extensions</code>, turn on Developer mode, and choose <em>Load unpacked</em>.</p>
+    </div>
+
+    <figure class="popup-fig">
+    <div class="popup" aria-label="Illustration of the extension popup">
+      <div class="popup-head">
+        <span class="logo-mark logo-sm" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M7.5 5.5v6.5a4.5 4.5 0 0 0 9 0V5.5"/><circle cx="12" cy="11.2" r="1.9"/></svg>
+        </span>
+        <b>Ulterior</b><span class="popup-count">3 on this page</span>
+      </div>
+      <div class="popup-item"><span class="pi-code c-rose">DP-03</span><div><b>Confirm shaming</b><p>&ldquo;No thanks, I don't want my order protected&hellip;&rdquo;</p></div></div>
+      <div class="popup-item"><span class="pi-code c-peach">DP-02</span><div><b>Basket sneaking</b><p>Insurance was ticked before you touched it.</p></div></div>
+      <div class="popup-item"><span class="pi-code c-sun">DP-01</span><div><b>False urgency</b><p>&ldquo;Only 2 left&rdquo; &mdash; unverified on one page.</p></div></div>
+      <p class="popup-foot">Observations, not accusations.</p>
+    </div>
+    <figcaption>Illustration of the extension popup.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================= final CTA ============================== -->
+<section class="final">
+  <div class="wrap final-in">
+    <h2>See it catch a trick in ten seconds.</h2>
+    <p>No sign-up. No API key. A real browser, a real shop, real findings.</p>
+    <div class="cta-row cta-center">
+      <a class="btn btn-light btn-lg" href="/demo/">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>Run a live audit</a>
+      <a class="btn btn-outline-light btn-lg" href="/dashboard/">Open the dashboard</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- =============================== footer =============================== -->
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="foot-brand">
+      <a class="brand" href="/" aria-label="Ulterior home">
+        <span class="logo-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M7.5 5.5v6.5a4.5 4.5 0 0 0 9 0V5.5"/><circle cx="12" cy="11.2" r="1.9"/></svg>
+        </span>
+        <span class="brand-text">Ulterior<small>by The Odyssey</small></span>
+      </a>
+      <p>Automated auditing for India's Dark Patterns Guidelines, 2023. Built for Smart India
+        Hackathon 2026 &middot; SIH26199 &middot; IIPS DAVV, Indore.</p>
+    </div>
+    <div class="foot-col">
+      <p class="foot-h">Product</p>
+      <a href="/demo/">Live demo</a><a href="/dashboard/">Dashboard</a><a href="#extension">Extension</a>
+    </div>
+    <div class="foot-col">
+      <p class="foot-h">Learn</p>
+      <a href="#how">How it works</a><a href="#patterns">The 13 patterns</a><a href="#why-now">Why now</a>
+    </div>
+    <div class="foot-col">
+      <p class="foot-h">Project</p>
+      <a href="https://github.com/anishgoyal0603/ulterior" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="#top">Back to top</a>
+    </div>
+  </div>
+  <div class="wrap">
+    <p class="disclaimer"><strong>Observation tool, not a legal determination.</strong>
+      A finding means a page shows characteristics matching a definition in the Guidelines &mdash;
+      not that anyone has broken the law.</p>
+  </div>
+</footer>
+
+<script src="/landing/landing.js" defer></script>
+</body>
+</html>

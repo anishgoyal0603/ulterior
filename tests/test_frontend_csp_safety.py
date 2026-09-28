@@ -25,6 +25,7 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 PAGES = [
+    ("landing/index.html", ["landing.css", "landing.js"]),
     ("demo/index.html", ["demo.css", "demo.js"]),
     ("dashboard/index.html", ["dashboard.css", "dashboard.js"]),
 ]
@@ -98,7 +99,7 @@ def test_external_scripts_are_deferred_not_racing_the_dom():
             )
 
 
-@pytest.mark.parametrize("script", ["demo/demo.js", "dashboard/dashboard.js"])
+@pytest.mark.parametrize("script", ["landing/landing.js", "demo/demo.js", "dashboard/dashboard.js"])
 def test_the_scripts_do_not_generate_inline_styles_either(script):
     """Removing style="..." from the HTML is only half the job. The dashboard
     built table cells with innerHTML containing style="color:#666", so the
@@ -111,3 +112,20 @@ def test_the_scripts_do_not_generate_inline_styles_either(script):
                      if not line.strip().startswith(("//", "*", "/*")))
     assert 'style="' not in code, f"{script} generates an inline style attribute"
     assert ".style.cssText" not in code, f"{script} sets style via cssText"
+
+
+def test_no_page_asks_for_a_web_font_the_csp_would_block():
+    """The CSP is default-src 'none' with no font-src, so every font request
+    is refused -- Google Fonts and self-hosted files alike. A stylesheet that
+    asks for one does not fail loudly: the browser logs a CSP violation to the
+    console and quietly falls back, and the page looks subtly wrong on the
+    one machine that matters. The design uses system faces on purpose."""
+    for page, assets in PAGES:
+        folder = (ROOT / page).parent
+        html = (ROOT / page).read_text()
+        assert "fonts.googleapis" not in html and "fonts.gstatic" not in html, page
+        for asset in assets:
+            if asset.endswith(".css"):
+                css = (folder / asset).read_text()
+                assert "@font-face" not in css, f"{asset} declares a web font"
+                assert "@import" not in css, f"{asset} imports another stylesheet"

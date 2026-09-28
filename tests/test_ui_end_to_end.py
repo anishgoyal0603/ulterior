@@ -44,30 +44,74 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def _stop_server(proc) -> None:
+    """Stop the server AND anything it started.
+
+    On Windows a virtualenv's python.exe is a small launcher that starts the
+    real interpreter as a child process. terminate() kills only the launcher,
+    so the actual server lived on, still holding the SQLite file open -- which
+    is why teardown failed with "WinError 32: the process cannot access the
+    file because it is being used by another process". taskkill /T takes the
+    whole tree.
+    """
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+
+
 @pytest.fixture(scope="module")
-def server():
+def server(tmp_path_factory):
     """A real uvicorn, on its own port, with its own database.
 
     Its own database matters: these tests assert on what the dashboard shows,
     and a developer's local audit history would make those assertions pass or
     fail depending on what they happened to run yesterday.
+
+    WHY THE SERVER WRITES TO A FILE, NOT A PIPE. It used to be started with
+    stdout=subprocess.PIPE, and nothing ever read that pipe. A pipe has a
+    fixed buffer; once it is full, the process writing to it blocks on its
+    next log line -- here, the server, mid-request. On Linux the buffer is
+    64 KB and the whole suite never filled it. On Windows it is about 4 KB:
+    two demo audits' worth of access-log lines, after which every request hung,
+    the third test reported "findings KPI still '—'", and every page load
+    after that timed out at 30 s. A file never fills, and it is still there
+    to read when something goes wrong.
     """
+    workdir = tmp_path_factory.mktemp("ui_server")
+    log_path = workdir / "server.log"
     port = _free_port()
     env = dict(os.environ)
     env.update({
         "ALLOW_LOCAL_TARGETS": "1",
         "PUBLIC_BASE_URL": f"http://127.0.0.1:{port}",
-        "DATABASE_URL": "sqlite:///./test_ui_e2e.db",
+        # In the test's own temp folder, not the repo root: nothing is left
+        # behind, and a stray file lock can never break the next run.
+        "DATABASE_URL": f"sqlite:///{(workdir / 'test_ui_e2e.db').as_posix()}",
         # These tests deliberately press the same button repeatedly.
         "RATE_LIMIT_AUDIT_PER_MINUTE": "100",
         "RATE_LIMIT_DEFAULT_PER_MINUTE": "1000",
     })
+    log_file = open(log_path, "wb")
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app.main:app",
          "--host", "127.0.0.1", "--port", str(port)],
         cwd=str(ROOT), env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        stdout=log_file, stderr=subprocess.STDOUT,
     )
+
+    def server_log() -> str:
+        log_file.flush()
+        return log_path.read_text(errors="replace")[-3000:]
+
     base = f"http://127.0.0.1:{port}"
     for _ in range(120):
         try:
@@ -76,23 +120,18 @@ def server():
             break
         except Exception:
             if proc.poll() is not None:
-                out = proc.stdout.read().decode(errors="replace")
-                pytest.fail(f"server died on startup:\n{out[-2000:]}")
+                log_file.close()
+                pytest.fail(f"server died on startup:\n{server_log()}")
             time.sleep(0.5)
     else:
-        proc.kill()
-        pytest.fail("server never became healthy")
+        _stop_server(proc)
+        log_file.close()
+        pytest.fail(f"server never became healthy:\n{server_log()}")
 
     yield base
 
-    proc.terminate()
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-    db = ROOT / "test_ui_e2e.db"
-    if db.exists():
-        db.unlink()
+    _stop_server(proc)
+    log_file.close()
 
 
 @pytest.fixture(scope="module")
@@ -406,10 +445,101 @@ def test_the_api_key_box_never_persists_the_key(server, dashboard):
 
 
 # =========================================================================
+# The landing page
+# =========================================================================
+
+@pytest.fixture
+def landing(server, browser):
+    page = browser.new_page(viewport={"width": 1440, "height": 1000})
+    wrapped = Page(page)
+    page.goto(f"{server}/", wait_until="load")
+    page.wait_for_timeout(400)
+    yield wrapped
+    page.close()
+
+
+def test_landing_opens_with_its_two_actions_pointing_at_real_pages(landing):
+    p = landing.page
+    assert "trick" in p.inner_text("h1").lower()
+    hero = p.query_selector(".hero .cta-row")
+    hrefs = [a.get_attribute("href") for a in hero.query_selector_all("a")]
+    assert hrefs == ["/demo/", "/dashboard/"], hrefs
+    assert "not a legal determination" in p.inner_text("body")
+    landing.assert_clean("on load")
+
+
+def test_landing_names_all_thirteen_patterns(landing):
+    codes = [c.inner_text() for c in landing.page.query_selector_all(".pcard .pcode")]
+    assert codes == [f"DP-{n:02d}" for n in range(1, 14)], codes
+
+
+def test_the_landing_hero_shows_what_the_demo_really_returns(server, landing):
+    """The hero receipt quotes the ShopMart demo shop line for line. If a
+    detector changes, the page must not go on advertising a result the
+    product no longer produces -- so the claim is checked against a real run."""
+    import json, urllib.request
+    req = urllib.request.Request(f"{server}/demo-audit", method="POST",
+        data=json.dumps({"adapter_name": "hosted_dark_demo"}).encode(),
+        headers={"Content-Type": "application/json"})
+    job = json.load(urllib.request.urlopen(req))
+    for _ in range(180):
+        job = json.load(urllib.request.urlopen(f"{server}/demo-audit/{job['id']}"))
+        if job["status"] in ("done", "failed"):
+            break
+        time.sleep(0.5)
+    assert job["status"] == "done", job.get("error_message")
+    found = job["violations"]
+    drip = [v for v in found if v["pattern_code"] == "DP-08"]
+    assert drip and drip[0]["evidence"]["disclosed_price"] == 299
+    assert drip[0]["evidence"]["final_total"] == 457
+    codes = {v["pattern_code"] for v in found}
+    assert {"DP-01", "DP-02", "DP-03", "DP-08"} <= codes, codes
+    note = landing.page.inner_text(".hero-note")
+    assert f"{len(found)} findings" in note and f"{len(codes)} patterns" in note, (note, len(found), codes)
+
+
+def test_the_mobile_menu_opens_and_closes(server, browser):
+    page = browser.new_page(viewport={"width": 390, "height": 844})
+    wrapped = Page(page)
+    page.goto(f"{server}/", wait_until="load")
+    page.wait_for_timeout(300)
+    assert not page.is_visible("#nav-menu a[href='/demo/']")
+    page.click("#nav-toggle")
+    assert page.get_attribute("#nav-toggle", "aria-expanded") == "true"
+    assert page.is_visible("#nav-menu a[href='/demo/']")
+    page.keyboard.press("Escape")
+    assert page.get_attribute("#nav-toggle", "aria-expanded") == "false"
+    wrapped.assert_clean("mobile menu")
+    page.close()
+
+
+def test_the_honestcart_link_preselects_the_clean_shop_without_running(server, browser):
+    """The landing page links to /demo/?shop=clean. It must pick the shop and
+    move the frame, label and address together -- and must NOT start an audit:
+    a link should never launch a browser on someone's behalf."""
+    page = browser.new_page(viewport={"width": 1440, "height": 1000})
+    wrapped = Page(page)
+    page.goto(f"{server}/demo/?shop=clean", wait_until="load")
+    page.wait_for_timeout(600)
+    assert page.input_value("#target") == "hosted_clean_demo"
+    assert "HonestCart" in page.inner_text("#frame-label")
+    assert "storefront-clean" in page.inner_text("#frame-url")
+    assert "storefront-clean" in page.get_attribute("#frame", "src")
+    assert not page.is_disabled("#run"), "a link started an audit"
+    assert page.inner_text("#status").strip() == ""
+    # Anything other than the one known word is ignored.
+    page.goto(f"{server}/demo/?shop=<script>", wait_until="load")
+    page.wait_for_timeout(400)
+    assert page.input_value("#target") == "hosted_dark_demo"
+    wrapped.assert_clean("preselect")
+    page.close()
+
+
+# =========================================================================
 # Both pages, both themes
 # =========================================================================
 
-@pytest.mark.parametrize("path", ["/demo/", "/dashboard/"])
+@pytest.mark.parametrize("path", ["/", "/demo/", "/dashboard/"])
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_pages_render_in_both_themes_without_console_errors(server, browser, path, scheme):
     page = browser.new_page(viewport={"width": 1440, "height": 1000}, color_scheme=scheme)
@@ -437,7 +567,7 @@ def test_pages_render_in_both_themes_without_console_errors(server, browser, pat
     page.close()
 
 
-@pytest.mark.parametrize("path", ["/demo/", "/dashboard/"])
+@pytest.mark.parametrize("path", ["/", "/demo/", "/dashboard/"])
 def test_pages_do_not_scroll_sideways_on_a_narrow_screen(server, browser, path):
     page = browser.new_page(viewport={"width": 390, "height": 844})
     page.goto(f"{server}{path}", wait_until="load")

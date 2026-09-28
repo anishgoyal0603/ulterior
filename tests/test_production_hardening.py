@@ -30,7 +30,10 @@ def client():
 # --- Check 4: security headers ---------------------------------------------
 
 def test_security_headers_present(client):
-    r = client.get("/")
+    # /healthz, not "/": the root now serves the landing page (HTML), which
+    # correctly gets the document policy tested below. This test is about
+    # what every API response carries, so it asks an API route.
+    r = client.get("/healthz")
     assert r.headers["X-Content-Type-Options"] == "nosniff"
     assert r.headers["X-Frame-Options"] == "DENY"
     assert "default-src 'none'" in r.headers["Content-Security-Policy"]
@@ -40,15 +43,35 @@ def test_security_headers_present(client):
 def test_hsts_absent_outside_production(client):
     # HSTS over plain HTTP is meaningless and can lock devs out of localhost.
     assert not config.IS_PRODUCTION
-    r = client.get("/")
+    r = client.get("/healthz")
     assert "Strict-Transport-Security" not in r.headers
 
 
 # --- Check 3: error handling ------------------------------------------------
 
 def test_correlation_id_on_every_response(client):
+    for path in ("/healthz", "/"):
+        r = client.get(path)
+        assert len(r.headers.get("X-Correlation-ID", "")) > 0, path
+
+
+def test_the_root_serves_the_landing_page_under_the_document_policy(client):
+    """The public address is the first impression, so "/" is a page now. It
+    must still carry the strict HTML policy: no third-party origin may run
+    code or be framed, and the legal disclaimer must be on it."""
     r = client.get("/")
-    assert len(r.headers.get("X-Correlation-ID", "")) > 0
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    csp = r.headers["Content-Security-Policy"]
+    assert "default-src 'none'" in csp
+    assert "frame-ancestors 'self'" in csp
+    assert "script-src 'self'" in csp and "https:" not in csp
+    assert r.headers["X-Frame-Options"] == "SAMEORIGIN"
+    assert "not a legal determination" in r.text
+    # Its assets are served, and a machine probe still has a JSON answer.
+    for asset in ("/landing/landing.css", "/landing/landing.js"):
+        assert client.get(asset).status_code == 200, asset
+    assert client.get("/healthz").json() == {"status": "ok"}
 
 
 def test_404_includes_correlation_id(client):
