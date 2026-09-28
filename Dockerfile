@@ -17,4 +17,12 @@ EXPOSE 8000
 # the container start fine and then fail every healthcheck, because the platform
 # routes traffic to a port nothing is listening on. ${PORT:-8000} keeps local
 # `docker run` and docker-compose working unchanged.
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+#
+# --proxy-headers / --forwarded-allow-ips: on Railway every request arrives
+# through Railway's HTTPS proxy, which says so in X-Forwarded-Proto. Without
+# trusting it, the app believes it is being served over plain http and builds
+# redirects that way -- /demo answered with "Location: http://.../demo/",
+# downgrading a visitor to http on their way to the page. The container is
+# only reachable through that proxy (there is no public TCP port), so the
+# header cannot come from anyone else.
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips="*"

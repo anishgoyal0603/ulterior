@@ -434,7 +434,7 @@ def test_demo_assets_are_not_cacheable_in_development():
     """A stale cache can serve a page that was broken two builds ago, and the
     symptom is identical to the bug that was already fixed -- which sends
     everyone hunting in the wrong place. Development sends no-store so that
-    cannot happen; production keeps normal caching."""
+    cannot happen; production sends no-cache (see the next test)."""
     from fastapi.testclient import TestClient
     from app.main import app
 
@@ -471,3 +471,58 @@ def test_the_extension_carries_the_same_name():
     import json as _json
     manifest = _json.loads((root / "extension" / "manifest.json").read_text())
     assert manifest["name"] == "Ulterior by The Odyssey", manifest["name"]
+
+
+def test_production_assets_must_be_revalidated_so_a_deploy_reaches_everyone(monkeypatch):
+    """Production used to send NO Cache-Control on the pages and their assets.
+
+    A browser then invents its own freshness window from the file's age. The
+    first time the stylesheets changed in production -- the redesign -- anyone
+    who had opened the demo before got the new HTML with their OLD cached
+    demo.css: no layout at all, and the lock icon in the address bar drawn as
+    a giant black rectangle. The server was serving the right file; the
+    browser never asked for it.
+
+    no-cache means "keep a copy, but check before using it". Unchanged files
+    come back as a body-less 304, so it is cheap -- which this also asserts,
+    because a policy that re-downloaded everything on every visit would be
+    the next thing someone "optimised" away.
+    """
+    from fastapi.testclient import TestClient
+    from app import config
+    from app.main import app
+
+    monkeypatch.setattr(config, "IS_PRODUCTION", True)
+    with TestClient(app) as client:
+        for path in ("/", "/landing/landing.css", "/landing/landing.js",
+                     "/demo/", "/demo/demo.css", "/demo/demo.js",
+                     "/dashboard/", "/dashboard/dashboard.css", "/dashboard/dashboard.js"):
+            first = client.get(path)
+            assert first.status_code == 200, f"{path} -> {first.status_code}"
+            policy = first.headers.get("cache-control", "")
+            assert "no-cache" in policy, f"{path} can be reused without asking: {policy!r}"
+
+            validators = {}
+            if first.headers.get("etag"):
+                validators["If-None-Match"] = first.headers["etag"]
+            if first.headers.get("last-modified"):
+                validators["If-Modified-Since"] = first.headers["last-modified"]
+            assert validators, f"{path} gives the browser nothing to revalidate with"
+            again = client.get(path, headers=validators)
+            assert again.status_code == 304, f"{path} revalidation returned {again.status_code}"
+
+
+def test_pages_reference_their_assets_by_a_url_no_stale_cache_holds(client):
+    """The one-time escape from caches filled BEFORE the no-cache fix.
+
+    Those entries were stored with no Cache-Control, so a browser holding one
+    will not ask the server again until its own guess expires -- a new header
+    cannot reach it. A new URL can: nobody has anything cached under
+    demo.css?v=..., so the first load after this deploy fetches it fresh.
+    """
+    for page, assets in (("/", ("landing.css", "landing.js")),
+                         ("/demo/", ("demo.css", "demo.js")),
+                         ("/dashboard/", ("dashboard.css", "dashboard.js"))):
+        html = client.get(page).text
+        for asset in assets:
+            assert f"{asset}?v=" in html, f"{page} loads {asset} by its bare, cacheable URL"

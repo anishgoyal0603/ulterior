@@ -8,7 +8,7 @@ from typing import List
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi import Path as PathParam, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -383,7 +383,7 @@ _LANDING_INDEX = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__
 
 
 @app.get("/", include_in_schema=False)
-def root():
+def root(request: Request):
     """The front door.
 
     This used to return {"status": "ok", ...} -- which meant the first thing a
@@ -397,7 +397,18 @@ def root():
     old JSON rather than a 500, so the root still answers.
     """
     if os.path.isfile(_LANDING_INDEX):
-        return FileResponse(_LANDING_INDEX, media_type="text/html")
+        page = FileResponse(_LANDING_INDEX, media_type="text/html",
+                            stat_result=os.stat(_LANDING_INDEX),
+                            headers={"Cache-Control": _cache_policy()})
+        # no-cache asks the browser to check back on every visit; answering
+        # an unchanged page with a body-less 304 is what keeps that cheap.
+        # StaticFiles does this for every other page; a plain FileResponse
+        # does not, so it is done here with the ETag Starlette computed.
+        etag = page.headers.get("etag")
+        if etag and etag in request.headers.get("if-none-match", ""):
+            return Response(status_code=304,
+                            headers={"ETag": etag, "Cache-Control": _cache_policy()})
+        return page
     return {"status": "ok", "service": "Ulterior by The Odyssey"}
 
 
@@ -412,28 +423,34 @@ def root():
 # Mounted LAST so it can never shadow an API route: FastAPI matches routes in
 # definition order, and a mount at "/dashboard" registered earlier would
 # swallow anything beneath that prefix.
-class _NoStoreStaticFiles(StaticFiles):
-    """Static files a browser is not allowed to cache, outside production.
+def _cache_policy() -> str:
+    """How long a browser may reuse a page or asset without asking again.
 
-    The demo page rendered as unstyled Times New Roman on a machine where the
-    server was serving demo.css perfectly well: the browser was replaying a
-    cached entry from an earlier build of this project, when the stylesheet
-    was inline and that file did not exist at all.
+    Development: never (no-store) -- a developer reloads constantly and must
+    always see the file on disk.
 
-    Nothing in these URLs carries a version, so a stale entry can outlive the
-    fix indefinitely -- and the failure looks IDENTICAL to the bug that was
-    already fixed, which sends everyone hunting in the wrong place. A few
-    kilobytes per reload is a trivial price for a page whose entire job is
-    being shown to somebody who has not seen it before.
+    Production: it may keep a copy but must CHECK before using it (no-cache).
+    This used to be "normal caching", i.e. no header at all, and that broke
+    the live demo the first time the stylesheets changed in production:
+    without a Cache-Control header a browser invents its own freshness window
+    from the file's age, so a visitor who had opened the demo before the
+    redesign reused the OLD demo.css for days without asking -- new HTML, old
+    stylesheet, no layout, icons drawn as giant black shapes. The server was
+    serving the right file the whole time; the browser never requested it.
 
-    Production keeps normal caching: there the assets are fetched once by many
-    people, not repeatedly by one person watching them change.
+    no-cache costs one conditional request per asset, answered with a
+    body-less 304 when nothing changed, so it stays cheap for returning
+    visitors while making a deploy visible to everyone on their next load.
     """
+    return "no-cache" if config.IS_PRODUCTION else "no-store, max-age=0, must-revalidate"
+
+
+class _NoStoreStaticFiles(StaticFiles):
+    """Static files that are always revalidated -- see _cache_policy()."""
 
     async def get_response(self, path, scope):
         response = await super().get_response(path, scope)
-        if not config.IS_PRODUCTION:
-            response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
+        response.headers["Cache-Control"] = _cache_policy()
         return response
 
 
