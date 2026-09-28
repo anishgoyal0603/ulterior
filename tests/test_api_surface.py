@@ -72,6 +72,17 @@ def test_static_mount_does_not_shadow_the_dashboard_summary_route(client):
     assert "total_audits" in r.json()
 
 
+def test_the_summary_says_whether_the_llm_pass_can_run(client, monkeypatch):
+    """The dashboard greys out "LLM language pass" when the server has no
+    Anthropic key, so ticking it can never silently do nothing."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert client.get("/dashboard/summary").json()["llm_available"] is False
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-real")
+    body = client.get("/dashboard/summary").json()
+    assert body["llm_available"] is True
+    assert "sk-test" not in str(body), "the key itself must never be echoed"
+
+
 def test_dashboard_html_is_served_from_the_api_origin(client):
     r = client.get("/dashboard/")
     assert r.status_code == 200

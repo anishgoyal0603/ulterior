@@ -38,6 +38,68 @@ function apiKey() {
  * user nothing about waiting a minute. A 502 from a proxy is not JSON at all
  * and threw a SyntaxError about "Unexpected token <".
  */
+/**
+ * A 401/403 is not a failure to report, it is a state to show: the dashboard
+ * is locked until someone connects with a key. Giving it its own type lets
+ * boot() and the run buttons tell "locked" apart from "the server is down".
+ */
+class AuthError extends Error {}
+
+/*
+ * "unknown" until the first protected call answers; then "open" (local
+ * development, no key configured), "ok" (a key was accepted), "locked" (a key
+ * is required and none was given) or "bad" (a key was given and refused).
+ */
+let authState = "unknown";
+
+function setAuthState(state, detail) {
+  authState = state;
+  const card = document.getElementById("keycard");
+  const note = document.getElementById("key-state");
+  const gate = document.getElementById("auth-gate");
+  card.classList.remove("is-locked", "is-bad", "is-ok");
+  gate.hidden = !(state === "locked" || state === "bad");
+
+  if (state === "locked") {
+    card.classList.add("is-locked");
+    note.textContent = "Locked \u2014 paste your access key and press Connect.";
+    document.getElementById("gate-title").textContent = "Connect to run real audits";
+  } else if (state === "bad") {
+    card.classList.add("is-bad");
+    note.textContent = "That key was not accepted. Check it and press Connect again.";
+    document.getElementById("gate-title").textContent = "That key was not accepted";
+  } else if (state === "ok") {
+    card.classList.add("is-ok");
+    note.textContent = "Connected \u2713" + (detail ? " \u00b7 " + detail : "")
+      + " \u00b7 key held in this tab only.";
+  } else if (state === "open") {
+    card.classList.add("is-ok");
+    note.textContent = "Local mode \u2014 this server needs no key."
+      + (detail ? " \u00b7 " + detail : "");
+  }
+
+  if (state === "locked" || state === "bad") {
+    const sel = document.getElementById("adapter-select");
+    sel.replaceChildren(new Option("Connect with your API key to load sites", ""));
+    ["kpi-audits", "kpi-violations", "kpi-top"].forEach((id) => {
+      document.getElementById(id).textContent = "\u2014";
+    });
+  }
+}
+
+/** Point the person at the key box instead of sending a request that will 401. */
+function askForKey() {
+  const input = document.getElementById("api-key");
+  input.focus();
+  const card = document.getElementById("keycard");
+  card.classList.remove("nudge");
+  void card.offsetWidth;            // restart the animation on repeat clicks
+  card.classList.add("nudge");
+  const status = document.getElementById("run-status");
+  status.textContent = "Enter your API key above and press Connect first.";
+  status.classList.add("is-error");
+}
+
 async function authFetch(path, options) {
   const opts = Object.assign({}, options);
   opts.headers = Object.assign({}, opts.headers || {});
@@ -55,7 +117,10 @@ async function authFetch(path, options) {
   }
 
   if (r.status === 401 || r.status === 403) {
-    throw new Error("Unauthorised \u2014 enter a valid API key above.");
+    // Record which kind of locked this is, so every panel agrees.
+    setAuthState(key ? "bad" : "locked");
+    throw new AuthError(key ? "That API key was not accepted."
+                            : "This dashboard needs an API key \u2014 enter it above.");
   }
   if (r.status === 429) {
     throw new Error("Too many requests \u2014 audits are limited to a few per "
@@ -99,6 +164,10 @@ async function loadAdapters() {
   const sel = document.getElementById("adapter-select");
   sel.innerHTML = Object.entries(adapters)
     .map(([k, v]) => `<option value="${escapeHtml(k)}">${escapeHtml(v)}</option>`).join("");
+  // /adapters is the cheapest protected call, so its answer decides whether
+  // the dashboard is connected.
+  const n = Object.keys(adapters).length;
+  setAuthState(apiKey() ? "ok" : "open", `${n} registered site${n === 1 ? "" : "s"}`);
 }
 
 /**
@@ -125,12 +194,19 @@ function endAuditRun() {
 }
 
 async function startAudit(payload, btn) {
+  // Known to be locked and still no key typed: say so, do not send a request
+  // that can only come back 401.
+  if ((authState === "locked" || authState === "bad") && !apiKey()) {
+    askForKey();
+    return;
+  }
   // Whatever was running is over: stop its timer and give its button back
   // before this run takes over.
   endAuditRun();
   btn.disabled = true;
   const status = document.getElementById("run-status");
-  status.textContent = "Running…";
+  status.classList.remove("is-error");
+  status.textContent = "Starting…";
 
   let job;
   try {
@@ -145,8 +221,15 @@ async function startAudit(payload, btn) {
     });
   } catch (err) {
     endAuditRun();
-    status.textContent = "";
-    showConnectionError(err);
+    if (err instanceof AuthError) {
+      askForKey();
+      status.textContent = err.message;
+      return;
+    }
+    // Shown right under the button that was pressed -- a refused URL is an
+    // answer to what the person just did, not a page-level outage.
+    status.textContent = err && err.message ? err.message : "The audit was not accepted.";
+    status.classList.add("is-error");
     return;
   }
 
@@ -191,7 +274,8 @@ async function startAudit(payload, btn) {
       return;
     }
 
-    status.textContent = `Running\u2026 ${secs}s`;
+    status.textContent = `Running\u2026 ${secs}s \u2014 a real browser is walking the site `
+      + "(usually 20\u201390 s).";
     status.classList.remove("is-error");
 
     // A run that never ends is a hang with a timer on it. The server's own
@@ -213,9 +297,8 @@ async function startAudit(payload, btn) {
         ? `Done \u2713 (${secs}s)`
         : (j.error_message || "Failed \u2717 \u2014 see the terminal running the server");
       status.classList.toggle("is-error", j.status !== "done");
-      renderDiscovery(j.discovery);
-      renderViolations(j.violations);
-      loadDashboard();
+      showJob(j);
+      loadDashboard({keepSelection: true}).catch(showConnectionError);
     }
   }, 1000);
 }
@@ -226,16 +309,41 @@ function runAudit() {
     document.getElementById("run-audit"));
 }
 
+/**
+ * People paste "flipkart.com/cart", not "https://flipkart.com/cart", and the
+ * server's SSRF guard rightly refuses anything without an http(s) scheme. So
+ * a bare host gets https:// in front, and a path starting with "/" means this
+ * same server (the try-it buttons use that for the bundled storefronts).
+ * Anything already carrying a scheme is left exactly as typed, so the guard
+ * still sees -- and refuses -- javascript:, file:, ftp: and friends.
+ */
+function normaliseUrl(u) {
+  if (u.startsWith("/")) return location.origin + u;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(u) && !/^[^:/]+:\d+(\/|$)/.test(u)) return u;
+  return "https://" + u;
+}
+
 function runUrlAudit() {
-  const raw = document.getElementById("target-urls").value;
-  const urls = raw.split(",").map(u => u.trim()).filter(Boolean);
+  const box = document.getElementById("target-urls");
+  const urls = box.value.split(",").map(u => u.trim()).filter(Boolean).map(normaliseUrl);
+  const status = document.getElementById("run-status");
   if (!urls.length) {
-    showConnectionError(new Error("Enter at least one URL to audit."));
+    status.textContent = "Paste a product, cart or home-page URL first.";
+    status.classList.add("is-error");
+    box.focus();
+    return;
+  }
+  box.value = urls.join(", ");      // show exactly what will be audited
+  const discover = document.getElementById("auto-discover").checked;
+  if (discover && urls.length > 1) {
+    status.textContent = "\u201cFind the checkout by itself\u201d starts from ONE URL. "
+      + "Turn it off to audit each of these pages as a step, or keep only the first.";
+    status.classList.add("is-error");
     return;
   }
   return startAudit({
     target_urls: urls,
-    auto_discover: document.getElementById("auto-discover").checked,
+    auto_discover: discover,
   }, document.getElementById("run-urls"));
 }
 
@@ -274,6 +382,32 @@ function renderDiscovery(discovery) {
     p.className = "disc-note";
     p.textContent = n;
     host.append(p);
+  });
+}
+
+/** Show one audit's findings in the bottom panel, and name which one it is. */
+let selectedJobId = null;
+function showJob(job) {
+  selectedJobId = job.id;
+  const title = document.getElementById("violations-title");
+  title.textContent = `Audit #${job.id} \u2014 ${job.site_name || job.adapter_name}`
+    + (job.status === "done" ? "" : ` (${job.status})`);
+  renderDiscovery(job.discovery);
+  if (job.status === "failed") {
+    const tbody = document.getElementById("violations-table");
+    tbody.replaceChildren();
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.className = "cov-note";
+    td.textContent = job.error_message || "This audit failed.";
+    tr.append(td);
+    tbody.append(tr);
+  } else {
+    renderViolations(job.violations || []);
+  }
+  document.querySelectorAll("#jobs-table tr").forEach((tr) => {
+    tr.classList.toggle("is-selected", Number(tr.dataset.id) === job.id);
   });
 }
 
@@ -438,8 +572,18 @@ function hideTip() {
   document.getElementById("chart-tip").hidden = true;
 }
 
-async function loadDashboard() {
+let JOBS = [];
+
+async function loadDashboard(opts) {
   const summary = await authFetch("/dashboard/summary");
+  // The LLM pass needs ANTHROPIC_API_KEY on the server. Without it the box
+  // would be a switch wired to nothing, so it says so and cannot be ticked.
+  if (summary.llm_available === false) {
+    const llm = document.getElementById("use-llm");
+    llm.checked = false;
+    llm.disabled = true;
+    document.getElementById("llm-note").textContent = "(not configured on this server)";
+  }
   document.getElementById("kpi-audits").textContent = summary.total_audits;
   document.getElementById("kpi-violations").textContent = summary.total_violations;
   const top = [...summary.by_pattern].sort((a,b) => b.count - a.count)[0];
@@ -447,15 +591,28 @@ async function loadDashboard() {
 
   renderPatternChart(summary.by_pattern);
 
-  const jobs = await authFetch("/audits");
-  document.getElementById("jobs-table").innerHTML = jobs.slice(0, 10).map(j => `
-    <tr>
+  const jobs = await authFetch("/audits?limit=20");
+  JOBS = jobs;
+  document.getElementById("jobs-table").innerHTML = jobs.slice(0, 20).map(j => `
+    <tr class="job-row" data-id="${Number(j.id)}" tabindex="0">
       <td>${escapeHtml(j.site_name || j.adapter_name)}</td>
       <td><span class="status ${escapeHtml(j.status)}">${escapeHtml(j.status)}</span></td>
       <td>${Number(j.violations.length)}</td>
     </tr>`).join("");
 
-  if (jobs.length && jobs[0].violations.length) renderViolations(jobs[0].violations);
+  const keep = opts && opts.keepSelection && JOBS.find(j => j.id === selectedJobId);
+  if (keep) showJob(keep);
+  else if (jobs.length) showJob(jobs[0]);
+}
+
+function openJobFromRow(e) {
+  const tr = e.target.closest("tr.job-row");
+  if (!tr) return;
+  const job = JOBS.find(j => j.id === Number(tr.dataset.id));
+  if (job) {
+    showJob(job);
+    document.getElementById("violations-title").scrollIntoView({behavior: "smooth", block: "start"});
+  }
 }
 
 async function loadCoverage() {
@@ -491,7 +648,9 @@ async function boot() {
   // unreachable. Any real failure is still surfaced, once, in a banner.
   await loadCoverage().catch(showConnectionError);
   const results = await Promise.allSettled([loadAdapters(), loadDashboard()]);
-  const failed = results.find(r => r.status === "rejected");
+  // A locked dashboard is shown by the key card and the gate, not by an
+  // error banner: nothing is broken, it is waiting for a key.
+  const failed = results.find(r => r.status === "rejected" && !(r.reason instanceof AuthError));
   if (failed) showConnectionError(failed.reason);
 }
 
@@ -500,9 +659,30 @@ document.getElementById("run-urls").addEventListener("click", runUrlAudit);
 document.getElementById("target-urls").addEventListener("keydown", (e) => {
   if (e.key === "Enter") runUrlAudit();
 });
-document.getElementById("reload").addEventListener("click", () => {
+function connect() {
   document.querySelectorAll(".conn-error").forEach(el => el.remove());
-  boot().catch(showConnectionError);
+  const status = document.getElementById("run-status");
+  status.classList.remove("is-error");
+  const btn = document.getElementById("reload");
+  btn.disabled = true;
+  document.getElementById("key-state").textContent = "Checking\u2026";
+  boot().catch(showConnectionError).finally(() => { btn.disabled = false; });
+}
+document.getElementById("reload").addEventListener("click", connect);
+document.getElementById("api-key").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") connect();
+});
+document.getElementById("jobs-table").addEventListener("click", openJobFromRow);
+document.getElementById("jobs-table").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") openJobFromRow(e);
+});
+document.querySelectorAll("[data-try]").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    const box = document.getElementById("target-urls");
+    box.value = normaliseUrl(chip.dataset.try);
+    document.getElementById("auto-discover").checked = true;
+    box.focus();
+  });
 });
 
 function showConnectionError(err) {
@@ -515,6 +695,9 @@ function showConnectionError(err) {
   // near-black text on near-black. And a viewer whose CSP forbids inline
   // styles dropped the declaration entirely.
   banner.className = "conn-error";
+  // One banner, the latest one. Pressing Connect five times used to stack
+  // five identical banners above the page.
+  document.querySelectorAll(".conn-error").forEach(el => el.remove());
   // textContent, never innerHTML: the message can carry server-supplied text.
   banner.textContent = `Could not load from ${where}. ${err && err.message ? err.message : ""}`;
   document.body.insertBefore(banner, document.body.firstChild);

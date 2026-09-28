@@ -297,9 +297,15 @@ def test_dashboard_opens_with_coverage_and_a_chart(dashboard):
 def test_every_dashboard_control_is_present_and_enabled(dashboard):
     p = dashboard.page
     for sel in ("#api-key", "#reload", "#target-urls", "#run-urls",
-                "#auto-discover", "#adapter-select", "#run-audit", "#use-llm"):
+                "#auto-discover", "#adapter-select", "#run-audit"):
         assert p.is_visible(sel), f"{sel} is missing"
         assert not p.is_disabled(sel), f"{sel} is disabled on load"
+    # The LLM box is the one control allowed to be off: it needs
+    # ANTHROPIC_API_KEY on the server, and when that is missing it must say so
+    # rather than be a switch wired to nothing.
+    assert p.is_visible("#use-llm")
+    if p.is_disabled("#use-llm"):
+        assert "not configured" in p.inner_text("#llm-note")
     # The adapter dropdown must actually be populated from the API.
     options = p.query_selector_all("#adapter-select option")
     assert len(options) >= 5, f"adapter list looks empty: {len(options)}"

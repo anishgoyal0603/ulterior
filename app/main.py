@@ -256,6 +256,11 @@ def summary(db: Session = Depends(get_db),
         "total_audits": total_jobs,
         "total_violations": total_violations,
         "by_pattern": [{"code": c, "name": n, "count": cnt} for c, n, cnt in by_pattern],
+        # Whether ticking "LLM language pass" would do anything. Read the same
+        # way detectors/layer3_language.py reads it, at call time, so the
+        # dashboard and the detector can never disagree. Behind the API key:
+        # it says nothing about the key itself, only whether one is set.
+        "llm_available": bool(os.environ.get("ANTHROPIC_API_KEY")),
     }
 
 

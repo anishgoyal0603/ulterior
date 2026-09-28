@@ -135,6 +135,19 @@ h1, h2 { color: var(--ink); text-wrap: balance; }
 .keyrow { display: flex; gap: 8px; }
 .keyrow input { flex: 1; min-width: 0; }
 .keynote { margin: 7px 0 0; font-size: 12px; color: var(--ink-3); }
+.keycard { transition: border-color .2s ease, box-shadow .2s ease; }
+.keycard.is-locked { border: 2px solid var(--brand); box-shadow: 0 0 0 5px var(--brand-soft), var(--shadow-sm); }
+.keycard.is-locked .keynote { color: var(--brand-soft-ink); font-weight: 700; }
+.keycard.is-bad { border: 2px solid var(--tier-indicative); box-shadow: 0 0 0 5px var(--ind-wash), var(--shadow-sm); }
+.keycard.is-bad .keynote { color: var(--ind-ink); font-weight: 700; }
+.keycard.is-ok .keynote { color: var(--prov-ink); font-weight: 700; }
+.keycard.nudge { animation: nudge .45s ease; }
+@keyframes nudge {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); } 40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); } 80% { transform: translateX(4px); }
+}
+@media (prefers-reduced-motion: reduce) { .keycard.nudge { animation: none; } }
 
 /* ------------------------------------------------------ inputs & buttons */
 input[type="text"], input[type="password"], select {
@@ -181,6 +194,32 @@ select { -webkit-appearance: none; appearance: none; padding-right: 38px; cursor
 .linkbox input[type="text"] { border: 0; background: transparent; padding: 12px 6px; font-size: 16px; box-shadow: none; }
 .linkbox input[type="text"]:focus { box-shadow: none; }
 .linkbox button { padding: 13px 20px; font-size: 15.5px; border-radius: 12px; }
+
+/* the locked state: says what to do, not just that something failed */
+.gate {
+  display: flex; gap: 14px; align-items: flex-start; margin: 0 0 14px; padding: 14px 16px;
+  border-radius: 16px; background: var(--brand-soft); border: 1px solid var(--brand);
+}
+.gate[hidden] { display: none; }
+.gate-icon { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: var(--surface); color: var(--brand-soft-ink); }
+.gate-icon svg.ico { width: 20px; height: 20px; }
+.gate strong { display: block; font-size: 15.5px; color: var(--ink); }
+.gate p { margin: 3px 0 0; font-size: 14px; color: var(--ink-2); }
+.gate a { color: var(--brand-soft-ink); font-weight: 700; }
+
+.tryrow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 2px 0; }
+.try-label { font-size: 13px; font-weight: 800; color: var(--ink-3); }
+button.chip {
+  padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 650;
+  background: var(--surface-2); border: 1px solid var(--line-2); color: var(--ink-2);
+}
+button.chip:hover { border-color: var(--brand); color: var(--brand-soft-ink); }
+.consent { margin: 8px 2px 0; font-size: 12.5px; color: var(--ink-3); }
+.card-hint { margin: -4px 0 10px; font-size: 12.5px; color: var(--ink-3); }
+tr.job-row { cursor: pointer; }
+tr.job-row:focus-visible td { outline: 2px solid var(--focus); outline-offset: -2px; }
+tr.job-row.is-selected td { background: var(--brand-soft); }
+tr.job-row.is-selected td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
 
 .discover { display: flex; align-items: flex-start; gap: 10px 18px; flex-wrap: wrap; margin: 14px 2px 0; }
 .discover .u4 { flex: 1 1 360px; margin: 2px 0 0; }

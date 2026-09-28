@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ulterior by The Odyssey — SIH26199</title>
-<link rel="stylesheet" href="dashboard.css?v=20260928">
+<link rel="stylesheet" href="dashboard.css?v=20260928b">
 </head>
 <body>
 
@@ -33,17 +33,17 @@
       <p class="lede">India's CCPA Dark Patterns Guidelines, 2023 &middot; automated compliance auditing.
         Paste a link and Ulterior walks the funnel, then shows every finding with its evidence.</p>
     </div>
-    <div class="keycard">
+    <div class="keycard" id="keycard">
       <label for="api-key">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L20 3M17 6l3 3M14.5 8.5l2 2"/></svg>
         API key
       </label>
       <div class="keyrow">
         <input id="api-key" type="password" autocomplete="off" spellcheck="false"
-               placeholder="Required in production · blank for local dev">
+               placeholder="Paste your access key (blank when running locally)">
         <button id="reload" type="button">Connect</button>
       </div>
-      <p class="keynote">Held in this tab's memory only &mdash; never saved to the browser.</p>
+      <p class="keynote" id="key-state">Held in this tab's memory only &mdash; never saved to the browser.</p>
     </div>
   </section>
 
@@ -60,6 +60,22 @@
     still passes through app/ssrf_guard.py before the browser opens it.
   -->
   <section class="auditcard" aria-label="Start an audit">
+    <!-- Shown only when the server says a key is required and none has been
+         accepted yet. Before this, a locked dashboard looked broken: an empty
+         dropdown, dashes in every tile, and buttons that answered 401 with a
+         thin banner at the very top of the page. -->
+    <div class="gate" id="auth-gate" hidden>
+      <span class="gate-icon" aria-hidden="true">
+        <svg class="ico" viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
+      </span>
+      <div>
+        <strong id="gate-title">Connect to run real audits</strong>
+        <p id="gate-text">This dashboard opens real websites in a real browser, so it only works with an
+          access key. Paste your key in the <b>API key</b> box above and press <b>Connect</b>.
+          No key? The <a href="/demo/">live demo</a> runs a full audit without one.</p>
+      </div>
+    </div>
+
     <div class="linkbox">
       <span class="linkbox-icon" aria-hidden="true">
         <svg class="ico" viewBox="0 0 24 24"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/></svg>
@@ -68,6 +84,18 @@
              placeholder="Audit any site - paste a product or cart URL (https://...)">
       <button class="primary" id="run-urls" type="button">Audit this site</button>
     </div>
+
+    <!-- One-click targets that are safe to audit: our own two storefronts
+         (relative paths, resolved against wherever this page is served) and
+         a public site built for automation practice. -->
+    <div class="tryrow" aria-label="Example targets">
+      <span class="try-label">Try:</span>
+      <button type="button" class="chip" data-try="/storefront/listing.html">ShopMart &middot; dark-pattern test shop</button>
+      <button type="button" class="chip" data-try="/storefront-clean/listing.html">HonestCart &middot; honest control</button>
+      <button type="button" class="chip" data-try="https://automationexercise.com/products">Automation Exercise &middot; public test site</button>
+    </div>
+    <p class="consent">Audit sites you own, have permission to test, or public test sandboxes.
+      Findings describe resemblance to a pattern in the Guidelines &mdash; not a legal finding.</p>
 
     <div class="discover">
       <label class="u3 switch">
@@ -87,7 +115,7 @@
       </div>
       <button class="primary" id="run-audit" type="button">Run Audit</button>
       <label class="u3 check">
-        <input type="checkbox" id="use-llm"> LLM language pass <em>(opt-in)</em>
+        <input type="checkbox" id="use-llm"> LLM language pass <em id="llm-note">(opt-in)</em>
       </label>
     </div>
     <p id="run-status" role="status" aria-live="polite"></p>
@@ -117,6 +145,7 @@
     </section>
     <section class="card">
       <h2>Recent audits</h2>
+      <p class="card-hint">Click a row to open its findings.</p>
       <div class="table-scroll">
         <table>
           <thead><tr><th>Site</th><th>Status</th><th>Violations</th></tr></thead>
@@ -127,7 +156,7 @@
   </div>
 
   <section class="card">
-    <h2>Latest audit &mdash; evidence-linked violations</h2>
+    <h2 id="violations-title">Latest audit &mdash; evidence-linked violations</h2>
     <!-- How the crawl went. Hidden unless discovery ran. -->
     <div id="discovery-report" class="u9" hidden></div>
     <div class="table-scroll">
@@ -156,6 +185,6 @@
   </div>
 </footer>
 
-<script src="dashboard.js?v=20260928" defer></script>
+<script src="dashboard.js?v=20260928b" defer></script>
 </body>
 </html>
