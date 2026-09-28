@@ -526,3 +526,38 @@ def test_pages_reference_their_assets_by_a_url_no_stale_cache_holds(client):
         html = client.get(page).text
         for asset in assets:
             assert f"{asset}?v=" in html, f"{page} loads {asset} by its bare, cacheable URL"
+
+
+def test_a_304_repeats_the_page_policy_and_never_the_api_one(monkeypatch):
+    """A 304 has no Content-Type, and the CSP is chosen by Content-Type -- so
+    every 304 used to be stamped with the JSON API's `default-src 'none'`.
+
+    Browsers copy a 304's headers onto their cached page, so the demo page,
+    revisited, blocked its own CSS, JS and storefront frame (see
+    tests/test_revisit_in_browser.py for the in-browser proof).
+
+    For an HTML document the 304 must carry EXACTLY the policy of its 200 --
+    not merely omit the bad one, because a browser that already stored the
+    bad policy only heals if something overwrites it. For a stylesheet or
+    script, where CSP means nothing, it carries none.
+    """
+    from fastapi.testclient import TestClient
+    from app import config
+    from app.main import app
+
+    api_policy = "default-src 'none'; frame-ancestors 'none'"
+    monkeypatch.setattr(config, "IS_PRODUCTION", True)
+    with TestClient(app) as client:
+        for path in ("/", "/demo/", "/dashboard/", "/storefront/cart.html"):
+            first = client.get(path)
+            again = client.get(path, headers={"If-None-Match": first.headers["etag"]})
+            assert again.status_code == 304, f"{path} -> {again.status_code}"
+            assert again.headers.get("content-security-policy") == \
+                first.headers["content-security-policy"], f"{path}: 304 policy differs from its 200"
+            assert api_policy not in again.headers["content-security-policy"], path
+            assert again.headers.get("x-frame-options") == "SAMEORIGIN", path
+        for path in ("/demo/demo.css", "/landing/landing.js"):
+            first = client.get(path)
+            again = client.get(path, headers={"If-None-Match": first.headers["etag"]})
+            assert again.status_code == 304, path
+            assert "content-security-policy" not in again.headers, path

@@ -220,6 +220,18 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
 # Security headers
 # ---------------------------------------------------------------------------
 
+def _is_document_path(path: str) -> bool:
+    """Whether a URL on this app names an HTML document.
+
+    Only needed for 304s, which carry no Content-Type to say so. Every HTML
+    page this app serves is either a directory index ("/", "/demo/",
+    "/dashboard/") or a .html file (the storefront fixtures). No JSON route
+    ends in "/" or ".html", and JSON routes never answer 304 anyway -- they
+    send no ETag.
+    """
+    return path.endswith("/") or path.endswith(".html")
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response = await call_next(request)
@@ -227,12 +239,39 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         h["X-Content-Type-Options"] = "nosniff"
         h["Referrer-Policy"] = "no-referrer"
+
+        # A 304 Not Modified carries NO body and NO Content-Type -- and every
+        # policy below is chosen BY Content-Type. A 304 therefore fell through
+        # to the JSON branch and was stamped `default-src 'none';
+        # frame-ancestors 'none'` plus X-Frame-Options: DENY.
+        #
+        # That is not harmless: browsers COPY a 304's headers onto the page
+        # they already have cached (RFC 9111 4.3.4, "freshening"). The cached
+        # demo page was re-labelled with the API's policy, and on every revisit
+        # Chrome refused the page's own stylesheet, script and storefront
+        # iframe -- unstyled Times New Roman, a dead Run button, a broken
+        # frame -- while the server logged nothing but clean 304s, because the
+        # browser never even asked for the files.
+        #
+        # So a 304 for an HTML document is given the SAME headers its 200
+        # would have had. Merely omitting them is not enough: browsers that
+        # were already poisoned would keep the bad policy they stored, and
+        # stay broken forever, since an unchanged page only ever answers 304.
+        # Sending the correct policy overwrites the bad one -- they heal on
+        # their next visit. A 304 for anything else (CSS, JS, images) carries
+        # no policy: CSP and X-Frame-Options only govern documents.
+        content_type_override = None
+        if response.status_code == 304:
+            if not _is_document_path(request.url.path):
+                return response
+            content_type_override = "text/html"
+
         # The demo page frames the storefront it is auditing, so HTML must be
         # frameable BY THIS ORIGIN. SAMEORIGIN keeps the clickjacking
         # protection that matters -- no external site can frame this app --
         # while allowing the one frame the product itself needs. JSON stays at
         # DENY: an API response has no reason to be framed by anything, ever.
-        content_type_early = (h.get("content-type") or "").lower()
+        content_type_early = (content_type_override or h.get("content-type") or "").lower()
         h["X-Frame-Options"] = "SAMEORIGIN" if content_type_early.startswith("text/html") else "DENY"
         h["Cross-Origin-Opener-Policy"] = "same-origin"
         h["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
@@ -257,7 +296,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # returns JSON and keeps the strict policy, while any HTML this app
         # ever serves gets the document policy without anyone remembering to
         # add another path to a list.
-        content_type = (h.get("content-type") or "").lower()
+        content_type = (content_type_override or h.get("content-type") or "").lower()
         if content_type.startswith("text/html"):
             h["Content-Security-Policy"] = (
                 "default-src 'none'; "
