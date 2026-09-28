@@ -175,7 +175,8 @@ Write-Host ""
 Write-Host "==> Ulterior by The Odyssey" -ForegroundColor Green
 Write-Host "==> Starting the API on http://127.0.0.1:$Port" -ForegroundColor Green
 Write-Host ""
-Write-Host "    Demo (start here) : http://127.0.0.1:$Port/demo/"
+Write-Host "    Home (start here) : http://127.0.0.1:$Port/"
+Write-Host "    Live demo         : http://127.0.0.1:$Port/demo/"
 Write-Host "    Dashboard         : http://127.0.0.1:$Port/dashboard/"
 Write-Host "    Coverage (JSON)   : http://127.0.0.1:$Port/coverage"
 Write-Host "    Dark storefront   : http://127.0.0.1:$Port/storefront/cart.html"

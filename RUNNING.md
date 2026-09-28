@@ -104,6 +104,34 @@ Every remaining command assumes you are inside that folder.
 The first `git push` will ask you to sign in to GitHub. A browser window
 opens; approve it and the push continues.
 
+### 3b. No Git? Download the ZIP instead
+
+Fine for **running and testing** the project. Not for contributing: a ZIP has
+no Git history, so nothing you change in it can be pushed back. If you will
+make changes, use the clone above.
+
+1. Open <https://github.com/anishgoyal0603/ulterior>
+2. Green **Code** button -> **Download ZIP**
+3. In File Explorer, right-click `ulterior-main.zip` -> **Extract All...** and
+   set the destination to your `Documents` folder
+4. Then:
+
+```powershell
+cd $HOME\Documents\ulterior-main
+```
+
+> **The folder is `ulterior-main`, not `ulterior`.** GitHub adds the branch
+> name. Check you are not one level too high: `dir` should list `app`,
+> `landing`, `demo` and `run_demo.ps1`. If it shows another `ulterior-main`
+> folder instead, `cd` into that one too.
+
+> **Do not run it from inside the ZIP.** Double-clicking the ZIP shows its
+> contents without extracting them, and nothing works from there.
+
+Every later step is the same, run from inside `ulterior-main`. To get newer
+changes later, download a fresh ZIP; do not copy it over the old folder, or
+deleted files will linger.
+
 ## 4. Run the setup script
 
 One command creates an isolated Python environment, installs the dependencies,
@@ -127,7 +155,8 @@ When it is ready:
 ```
 ==> Starting the API on http://127.0.0.1:8000
 
-    Demo (start here) : http://127.0.0.1:8000/demo/
+    Home (start here) : http://127.0.0.1:8000/
+    Live demo         : http://127.0.0.1:8000/demo/
     Dashboard         : http://127.0.0.1:8000/dashboard/
     Coverage (JSON)   : http://127.0.0.1:8000/coverage
     Dark storefront   : http://127.0.0.1:8000/storefront/cart.html
@@ -142,7 +171,8 @@ The terminal is *supposed* to look frozen now. That is the server running.
 ## 5. Open it in a real browser
 
 Leave PowerShell running. Open **Chrome or Edge** at
-<http://127.0.0.1:8000/demo/>.
+<http://127.0.0.1:8000/> -- the home page. Its **Run a live audit** button
+takes you to the demo.
 
 > **Use a real browser window.** Do not use VS Code's built-in preview pane
 > (Simple Browser / Live Preview) or any in-app webview. Those impose a
@@ -150,7 +180,14 @@ Leave PowerShell running. Open **Chrome or Edge** at
 > renders as unstyled Times New Roman with a broken box where the storefront
 > should be. It looks like the software is broken. It is not.
 
-## 6. Try the two things worth seeing
+## 6. Try the three pages
+
+### The home page — `/`
+
+What a visitor sees first. The receipt in the hero is the real demo shop, and
+the findings beside it are what the auditor genuinely returns on it -- a test
+fails if they ever drift apart. The **HonestCart** chip opens the demo with the
+clean shop already selected.
 
 ### The public demo — `/demo/`
 
@@ -200,16 +237,16 @@ Stop the server first (**Ctrl+C**), then:
 Expect:
 
 ```
-271 passed, 28 deselected, 1 warning
+286 passed, 36 deselected, 1 warning
 ```
 
 ### Reading that line
 
-**`28 deselected` is not a problem, and there is nothing to remove.** It is
+**`36 deselected` is not a problem, and there is nothing to remove.** It is
 that command doing exactly what you asked. `-m "not ui"` means *skip the tests
-marked `ui`* — the 28 browser tests that launch a real server and drive a real
+marked `ui`* — the 36 browser tests that launch a real server and drive a real
 Chromium window. pytest is reporting how many it set aside on your
-instruction. Drop the flag and all 299 run.
+instruction. Drop the flag and all 322 run.
 
 **`1 warning` is also fine.** It comes from inside Starlette's own code, not
 this project. Ours are at zero and a test keeps them there.
@@ -236,7 +273,7 @@ About six minutes. Runs everything, including the browser tests:
 node tests\test_extension_cache.js
 ```
 
-Expect **299 passed** and **ALL TESTS PASSED** (12 checks on the browser
+Expect **322 passed** and **ALL TESTS PASSED** (12 checks on the browser
 extension; `node` is only needed for this one file — skip it if you have not
 installed Node).
 
