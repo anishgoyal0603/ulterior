@@ -1,0 +1,12 @@
+Date,Browser,Site,Page (product / cart / checkout / other),What you did,What Ulterior showed (codes),Was it right? (yes / false alarm / missed),Price picked shown,Total shown,What the page really showed,Diagnostics pasted? (yes/no),Notes
+,,amazon.in,product,Opened a product,,,,,,,
+,,amazon.in,checkout,Buy now -> stopped before paying,,,,,,,
+,,flipkart.com,product,Opened a product,,,,,,,
+,,flipkart.com,checkout,Buy now -> stopped before paying,,,,,,,
+,,bookmyshow.com,checkout,Picked 2 seats -> summary page,,,,,,,
+,,makemytrip.com,review,Picked a flight -> review page,,,,,,,
+,,goibibo.com,review,Picked a flight -> review page,,,,,,,
+,,swiggy.com,cart,Added food -> cart,,,,,,,
+,,zomato.com,cart,Added food -> cart,,,,,,,
+,,myntra.com,bag,Added to bag -> bag page,,,,,,,
+,,(any site),other,Pressed Scan this page,,,,,,,

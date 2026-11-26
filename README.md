@@ -295,7 +295,7 @@ session the crawler runs under, not to a registered user of this app.
 | **Third-party egress** (`detectors/layer3_language.py`) | **Only decline-button text** — 1–2 short strings per page | Anthropic API | **Redacted before send.** Optional: with no API key, nothing leaves the machine |
 | **API responses** (`app/main.py`) | Redacted violations only | HTTP clients | Filesystem paths no longer exposed (`has_screenshot: bool` instead) |
 | **PDF reports** (`report/generator.py`) | Redacted explanations + evidence | Local file | Inherits redaction from DB |
-| **Browser extension** (`extension/content.js`) | Page text on **every site the user visits** | `chrome.storage.local` | **Redacted before storage;** hostname stored instead of full URL |
+| **Browser extension** (`extension/src/`) | Page text on **listed shopping/travel sites**, or a page the user explicitly scans | Results, picked price, timers, pop-ups in `storage.session` (memory only, per-site); optional price history (product id, price, date, hashed name fingerprint) in `storage.local` | **Redacted before storage;** site name only, never the URL; **no network calls** except an opt-in, previewed report the user sends |
 
 ### What was fixed
 
@@ -307,7 +307,7 @@ session the crawler runs under, not to a registered user of this app.
 2. **Redaction applied before DB write** (`app/tasks.py`), **before
    third-party send** (`detectors/layer3_language.py`), **before terminal
    output** (`capture/inspect_site.py`), and **before extension storage**
-   (`extension/content.js`).
+   (`extension/src/core.js`).
 3. **`screenshot_path` removed from API responses** — replaced with
    `has_screenshot: bool`. The raw path leaked server directory structure
    to every caller.
@@ -559,15 +559,22 @@ python -m capture.inspect_site https://example.com/product/123
 # 4. Audit it via POST /audits {"adapter_name": "your_new_adapter"}
 ```
 
-### Load the browser extension (manual — Chrome only supports this via UI)
+### Load the browser extension
 
 1. `chrome://extensions` → enable Developer Mode → "Load unpacked" → select `extension/`
-2. Browse any site; the toolbar badge shows a live count of detected patterns
-3. Click the extension icon for details on the current page
+   (or unzip `/download/ulterior-extension.zip` from the running server)
+2. Shop on a supported site (Amazon.in, Flipkart, BookMyShow, MakeMyTrip, ... — the
+   list is `SUPPORTED_SITES` in `extension/src/core.js`); anywhere else press
+   **Scan this page** in the popup
+3. The toolbar badge counts findings; the popup and the corner alert show the evidence
+4. All 13 patterns (DP-05 and DP-13 partly), in English, Hindi and Hinglish; a price
+   tracker (history graph, "good price?" verdict, fake-discount check, watchlist with
+   target-price alerts, cross-shop comparison); opt-in community prices and "Report this page"
+5. Firefox and Edge: `python scripts/package_extension.py` builds both store packages
 
-Note: the extension's JS is syntax-verified (`node --check`) but not
-click-tested in a live Chrome session from this build environment —
-verify this yourself before a live demo.
+`tests/test_extension_in_browser.py` loads the real extension into Chromium and
+walks fictional flight, movie-ticket and shop flows; `RUNNING.md` section 7c
+covers testing it on real sites and packaging it for the Chrome Web Store.
 
 ## Project structure
 

@@ -79,9 +79,9 @@ jobs:
   extension-tests:
     name: Browser-extension suite (Node)
     runs-on: ubuntu-latest
-    # No container: these tests run extension/content.js in plain Node against
-    # a mocked DOM. They need a Node runtime and nothing else — no Python, no
-    # Chromium, no system libraries.
+    # No container: these tests run extension/src/core.js in plain Node. The
+    # extension in a real Chromium is covered by tests/test_extension_in_browser.py
+    # in the Python job's browser suite.
     steps:
       - uses: actions/checkout@v4
 
@@ -90,16 +90,13 @@ jobs:
           node-version: '20'
 
       - name: Syntax-check the extension sources
-        # Cheap and worth its place: content.js is loaded by a real browser,
+        # Cheap and worth its place: these files are loaded by a real browser,
         # not by a bundler, so a syntax error would ship silently and only
         # surface when someone installed the extension.
-        run: |
-          node --check extension/content.js
-          node --check extension/background.js
-          node --check extension/popup.js
+        run: for f in extension/*.js extension/src/*.js; do node --check "$f"; done
 
       - name: Validate the extension manifest
         run: node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json','utf8')); console.log('manifest.json is valid JSON')"
 
-      - name: Run browser-extension tests
-        run: node tests/test_extension_cache.js
+      - name: Run browser-extension unit tests
+        run: node tests/extension_core.test.js

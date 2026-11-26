@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ulterior by The Odyssey — SIH26199</title>
-<link rel="stylesheet" href="dashboard.css?v=20260928b">
+<link rel="stylesheet" href="dashboard.css?v=20261004b">
 </head>
 <body>
 
@@ -156,13 +156,40 @@
   </div>
 
   <section class="card">
-    <h2 id="violations-title">Latest audit &mdash; evidence-linked violations</h2>
+    <div class="card-head">
+      <h2 id="violations-title">Latest audit &mdash; evidence-linked violations</h2>
+      <!-- The PDF a pilot store's compliance team or a regulator reads. Fetched
+           with the API key and saved from memory, because a plain link cannot
+           carry the X-API-Key header. -->
+      <button id="download-pdf" type="button" hidden>
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+        PDF report
+      </button>
+    </div>
     <!-- How the crawl went. Hidden unless discovery ran. -->
     <div id="discovery-report" class="u9" hidden></div>
     <div class="table-scroll">
       <table class="vtable">
         <thead><tr><th>Pattern</th><th>Step</th><th>Layer</th><th>Confidence</th><th>Explanation</th></tr></thead>
         <tbody id="violations-table"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Pages that browser-extension users chose to report. Opt-in on their
+       side, review queue on ours: nothing here is a finding until a person on
+       the team has checked it. -->
+  <section class="card" id="reports-card">
+    <div class="card-head">
+      <h2>Reports from extension users</h2>
+      <span class="card-hint" id="reports-count"></span>
+    </div>
+    <p class="card-hint">Sent only by people who switched reporting on and pressed Send. Check each one before
+      repeating it &mdash; see VERIFYING_A_FINDING.md.</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Received</th><th>Site</th><th>Page</th><th>Patterns</th><th>First observation</th></tr></thead>
+        <tbody id="reports-table"></tbody>
       </table>
     </div>
   </section>
@@ -185,6 +212,6 @@
   </div>
 </footer>
 
-<script src="dashboard.js?v=20260928b" defer></script>
+<script src="dashboard.js?v=20261004b" defer></script>
 </body>
 </html>

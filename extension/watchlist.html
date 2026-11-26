@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>My watchlist - Ulterior</title>
+<link rel="stylesheet" href="popup.css">
+<link rel="stylesheet" href="watchlist.css">
+</head>
+<body class="page">
+  <header class="top">
+    <span class="mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M7.5 5.5v6.5a4.5 4.5 0 0 0 9 0V5.5"/><circle cx="12" cy="11.2" r="1.9"/></svg>
+    </span>
+    <div class="brand"><b>My watchlist</b><small>Ulterior by The Odyssey</small></div>
+    <span class="site" id="count"></span>
+  </header>
+  <main class="wl">
+    <p class="fine" id="intro">Products you are watching, with the price you want to pay. Ulterior tells you when a
+      product is at or under your target: when you open it, and every six hours from community prices if you
+      switched those on. Everything here is kept on this device.</p>
+    <div class="actions">
+      <button class="btn" id="check-now" type="button" hidden>Check community prices now</button>
+      <span class="fine" id="check-status" role="status"></span>
+    </div>
+    <div id="items"></div>
+    <p class="empty" id="empty" hidden>Nothing watched yet. Open a product on a shopping site, then use
+      <b>Watch price</b> in the corner panel or the toolbar popup.</p>
+
+    <section class="box" id="alerts-box" hidden>
+      <p class="box-title">Recent price alerts</p>
+      <ul class="alerts" id="alerts"></ul>
+    </section>
+
+    <section class="box" id="drops-box" hidden>
+      <p class="box-title">Biggest recent drops seen by the community</p>
+      <ul class="alerts" id="drops"></ul>
+    </section>
+  </main>
+  <script src="src/core.js"></script>
+  <script src="src/chart.js"></script>
+  <script src="src/watch.js"></script>
+  <script src="watchlist.js"></script>
+</body>
+</html>

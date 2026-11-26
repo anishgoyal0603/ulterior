@@ -113,6 +113,15 @@ RATE_LIMIT_DEFAULT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_DEFAULT_PER_MINUT
 # sized for what the page genuinely does rather than for launching browsers.
 RATE_LIMIT_POLL_PER_MINUTE = int(os.environ.get("RATE_LIMIT_POLL_PER_MINUTE", "240"))
 RATE_LIMIT_STATIC_PER_MINUTE = int(os.environ.get("RATE_LIMIT_STATIC_PER_MINUTE", "600"))
+# Reports sent from the browser extension: a person pressing Send, so a few a
+# minute is generous, and the endpoint needs no key, so it must stay small.
+RATE_LIMIT_REPORTS_PER_MINUTE = int(os.environ.get("RATE_LIMIT_REPORTS_PER_MINUTE", "10"))
+MAX_STORED_EXTENSION_REPORTS = int(os.environ.get("MAX_STORED_EXTENSION_REPORTS", "5000"))
+# Community prices: a price history is only useful over months, so these are
+# kept longer than audits -- but bounded by age and by count all the same.
+RATE_LIMIT_PRICES_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PRICES_PER_MINUTE", "120"))
+COMMUNITY_RETENTION_DAYS = int(os.environ.get("COMMUNITY_RETENTION_DAYS", "400"))
+MAX_PRICE_OBSERVATIONS = int(os.environ.get("MAX_PRICE_OBSERVATIONS", "1000000"))
 
 # Trust X-Forwarded-For only when explicitly enabled. Behind a reverse proxy
 # this must be on, or every client looks like the proxy and rate limiting

@@ -1,19 +1,122 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<style>
-  body { font-family: -apple-system, sans-serif; width: 340px; margin: 0; padding: 14px; }
-  h1 { font-size: 15px; margin: 0 0 10px; color: #1a1a2e; }
-  .flag { border-left: 3px solid #e94560; background: #fdf2f3; padding: 8px 10px; margin-bottom: 8px; border-radius: 4px; font-size: 12px; }
-  .flag .code { font-weight: 700; color: #e94560; }
-  .empty { color: #888; font-size: 13px; text-align: center; padding: 20px 0; }
-</style>
+<title>Ulterior</title>
+<link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <h1>Ulterior</h1>
-  <p class="credit">by The Odyssey</p>
-  <div id="flags"></div>
+  <header class="top">
+    <span class="mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M7.5 5.5v6.5a4.5 4.5 0 0 0 9 0V5.5"/><circle cx="12" cy="11.2" r="1.9"/></svg>
+    </span>
+    <div class="brand">
+      <b>Ulterior</b>
+      <small>by The Odyssey</small>
+    </div>
+    <span class="site" id="site"></span>
+  </header>
+
+  <main>
+    <section id="not-scanned" class="box" hidden>
+      <p class="lead" id="not-scanned-text">Ulterior has not checked this page.</p>
+      <button class="btn primary" id="scan" type="button">Scan this page</button>
+      <p class="fine">It runs on its own on popular shopping, food and travel sites. Anywhere else it
+        reads a page only when you press this button.</p>
+    </section>
+
+    <section id="results" hidden>
+      <p class="summary" id="summary"></p>
+      <div id="findings"></div>
+
+      <div class="box" id="journey" hidden>
+        <p class="box-title">Price check across your booking</p>
+        <dl class="kv" id="journey-kv"></dl>
+      </div>
+
+      <div class="box" id="price" hidden>
+        <p class="box-title">Price history</p>
+        <span class="verdict" id="verdict"></span>
+        <p class="hist" id="verdict-detail"></p>
+        <div class="periods" id="periods" role="group" aria-label="Period">
+          <button type="button" data-days="15">15d</button>
+          <button type="button" data-days="45">45d</button>
+          <button type="button" data-days="90" aria-pressed="true">90d</button>
+          <button type="button" data-days="182">6m</button>
+          <button type="button" data-days="0">All</button>
+        </div>
+        <svg id="chart" class="chart" role="img"></svg>
+        <div class="tip" id="tip" hidden></div>
+        <p class="hist" id="history-text"></p>
+        <p class="disc" id="discount" hidden></p>
+        <details class="pricelist"><summary>Show the prices as a list</summary><ul id="pricelist"></ul></details>
+        <div class="watchrow" id="watch-form">
+          <label for="target">Alert me at &#8377;</label>
+          <input type="number" id="target" min="1" step="1">
+          <button class="btn primary" id="watch" type="button">Watch price</button>
+        </div>
+        <div class="watchrow" id="watching" hidden>
+          <span id="watching-text"></span>
+          <button class="btn" id="unwatch" type="button">Stop watching</button>
+        </div>
+        <p class="fine"><button class="link" id="open-watchlist" type="button">My watchlist</button> &middot;
+          <span id="price-source">Prices you have seen, kept on this device.</span></p>
+      </div>
+
+      <div class="box" id="compare" hidden>
+        <p class="box-title">Compare prices</p>
+        <ul class="elsewhere" id="elsewhere"></ul>
+        <p class="fine" id="compare-hint">Search for this product on:</p>
+        <div class="links" id="compare-links"></div>
+      </div>
+
+      <ul class="notes" id="notes"></ul>
+
+      <div class="actions">
+        <button class="btn primary" id="copy" type="button">Copy evidence</button>
+        <button class="btn" id="rescan" type="button">Check again</button>
+        <button class="btn" id="report" type="button" hidden>Report this page</button>
+      </div>
+
+      <div class="box" id="report-preview" hidden>
+        <p class="box-title">This is exactly what will be sent</p>
+        <pre id="report-json"></pre>
+        <p class="fine">No page address, no account, nothing about you. Sent once, only when you press Send.</p>
+        <div class="actions">
+          <button class="btn primary" id="report-send" type="button">Send</button>
+          <button class="btn" id="report-cancel" type="button">Cancel</button>
+        </div>
+      </div>
+      <p class="fine" id="report-status" role="status"></p>
+
+      <p class="fine" id="complain">To raise it: National Consumer Helpline 1915 &middot; WhatsApp 8800001915 &middot; consumerhelpline.gov.in</p>
+    </section>
+
+    <details class="coverage">
+      <summary>What Ulterior checks (13 patterns)</summary>
+      <ul id="coverage"></ul>
+    </details>
+  </main>
+
+  <footer class="settings">
+    <label class="toggle"><input type="checkbox" id="opt-overlay"> Show alerts on the page</label>
+    <label class="toggle"><input type="checkbox" id="opt-history"> Keep price history on this device</label>
+    <label class="toggle"><input type="checkbox" id="opt-pricecheck"> Show the price check on product pages</label>
+    <label class="toggle"><input type="checkbox" id="opt-community"> Community prices: share prices I see and get history from others (off unless you turn it on)</label>
+    <label class="toggle"><input type="checkbox" id="opt-report"> Let me send reports to Ulterior (off unless you turn it on)</label>
+    <div class="foot-row">
+      <button class="link" id="clear-history" type="button">Clear price history</button>
+      <button class="link" id="diagnostics" type="button">Copy diagnostics</button>
+      <a class="link" href="https://ulterior-api-production.up.railway.app/privacy" target="_blank" rel="noopener noreferrer">Privacy</a>
+    </div>
+    <p class="fine">Observations of resemblance to patterns in India's 2023 dark-pattern Guidelines, not legal
+      findings. Nothing you browse leaves your browser unless you choose to send a report.</p>
+  </footer>
+
+  <script src="src/core.js"></script>
+  <script src="src/chart.js"></script>
+  <script src="src/history.js"></script>
+  <script src="src/watch.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

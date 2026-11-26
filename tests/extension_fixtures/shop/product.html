@@ -1,0 +1,19 @@
+<!doctype html><html><head><meta charset="utf-8"><title>HonestCart - Steel water bottle</title>
+<link rel="stylesheet" href="../fixture.css"></head><body>
+<header>HonestCart (fictional test site)</header>
+<main>
+<div class="card">
+  <h1>Steel water bottle, 1 litre</h1>
+  <p><span class="big" id="price">₹1,299</span> <span class="mrp">M.R.P. ₹2,499</span> <span class="muted">Save ₹1,200</span></p>
+  <p class="muted">Inclusive of all taxes · Free delivery · EMI from ₹105/month</p>
+  <p>In stock</p>
+  <p class="muted">Only 3 left in stock.</p>
+  <a class="btn" href="checkout.html" id="buy">Buy now</a>
+  <button type="button">Add to cart</button>
+</div>
+</main>
+<script>
+  const p = new URLSearchParams(location.search).get("p");
+  if (p) document.getElementById("price").textContent = "₹" + Number(p).toLocaleString("en-IN");
+</script>
+</body></html>

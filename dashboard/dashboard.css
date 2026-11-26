@@ -398,3 +398,9 @@ tbody tr:hover td { background: var(--surface-2); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* audit heading with its PDF button */
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
+.card-head h2 { margin: 0; }
+#download-pdf { padding: 8px 12px; font-size: 13.5px; }
+#download-pdf svg.ico { width: 16px; height: 16px; }

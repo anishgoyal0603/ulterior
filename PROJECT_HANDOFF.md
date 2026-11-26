@@ -149,7 +149,8 @@ not `DP-*`, so they're never confused with the legally-defined 13 in a report.
 - `tests/test_production_hardening.py` — config fail-fast, headers, rate limits
 - `tests/test_xss_and_injection.py` — proved a real XSS exploit, then fixed it
 - `tests/test_self_serve_ssrf.py` — SSRF guard through the real API
-- `tests/test_extension_cache.js` — LRU eviction, real pattern validation
+- `tests/extension_core.test.js` — money parsing, fee labels, drip judgement, redaction (Node)
+- `tests/test_extension_in_browser.py` — the real extension in Chromium on fictional flight, ticket and shop flows
 
 ### 2.7 Real-world data grounding (not live-scraped — see section 4 for why)
 

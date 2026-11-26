@@ -88,3 +88,82 @@ class DemoAuditCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     adapter_name: str
+
+
+# ------------------------------------------------- browser-extension reports
+#
+# The one write endpoint that needs no API key, so it accepts the smallest,
+# most tightly bounded shape that does the job: a site name, a version, and
+# up to twenty findings of capped length. Anything else is a 422.
+
+from typing import Dict, Literal  # noqa: E402
+from pydantic import field_validator  # noqa: E402
+
+_SITE_RE = r"^[a-z0-9.-]{1,120}$"
+
+
+class ExtensionFindingIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: str = Field(pattern=r"^DP-(0[1-9]|1[0-3])$")
+    tier: Literal["provable", "corroborated", "indicative"]
+    title: str = Field(max_length=300)
+    detail: str = Field(default="", max_length=600)
+    evidence: Dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("evidence")
+    @classmethod
+    def _small_evidence(cls, v):
+        if len(v) > 10:
+            raise ValueError("at most 10 evidence items")
+        for k, val in v.items():
+            if len(k) > 60 or len(val) > 300:
+                raise ValueError("evidence keys up to 60 and values up to 300 characters")
+        return v
+
+
+class ExtensionReportIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    site: str = Field(pattern=_SITE_RE)
+    version: str = Field(pattern=r"^[0-9]{1,3}(\.[0-9]{1,3}){1,3}$")
+    page_type: Literal["checkout", "product", "other"] = "other"
+    captured_at: Optional[str] = Field(default=None, max_length=40)
+    findings: List[ExtensionFindingIn] = Field(min_length=1, max_length=20)
+
+
+class ExtensionReportOut(BaseModel):
+    id: int
+    created_at: datetime
+    site: str
+    version: Optional[str] = None
+    page_type: Optional[str] = None
+    findings: List[dict]
+
+
+# ------------------------------------------------------ community prices
+
+class PriceObservationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str = Field(max_length=230)
+    price: float = Field(gt=0, le=10_000_000)
+
+
+class PricesIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    observations: List[PriceObservationIn] = Field(min_length=1, max_length=20)
+
+
+class PriceHistoryIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str = Field(max_length=230)
+    days: int = Field(default=365, ge=1, le=730)
+
+
+class PriceLatestIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    keys: List[str] = Field(min_length=1, max_length=100)
+
+
+class PriceDropsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    days: int = Field(default=7, ge=2, le=30)
+    limit: int = Field(default=15, ge=1, le=50)

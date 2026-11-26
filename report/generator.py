@@ -3,6 +3,7 @@ officer or regulator would actually review, with evidence linked per
 violation, not a bare score."""
 
 from datetime import datetime
+from xml.sax.saxutils import escape as _esc
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import mm
@@ -46,7 +47,11 @@ def generate_audit_report(site_name: str, violations: list, output_path: str):
                              topMargin=15*mm, bottomMargin=15*mm)
     story = []
 
-    story.append(Paragraph(f"Dark Pattern Observation Report — {site_name}", title_style))
+    # ReportLab's Paragraph reads its text as markup. Site names, step names
+    # and explanations all quote audited pages, and a "<" or "&" on a page
+    # either breaks the PDF ("paraparser: syntax error") or, worse, formats
+    # it. Escape everything that came from outside.
+    story.append(Paragraph(f"Dark Pattern Observation Report — {_esc(str(site_name))}", title_style))
     story.append(Paragraph("Produced by Ulterior, built by team The Odyssey · SIH26199",
                            styles["Italic"]))
     story.append(Paragraph(
@@ -109,12 +114,12 @@ def generate_audit_report(site_name: str, violations: list, output_path: str):
     for v in violations:
         tier = (v.get("evidence") or {}).get("evidence_tier", "unstated")
         table_data.append([
-            Paragraph(f"{v['pattern_code']}<br/>{v['pattern_name']}", small),
-            Paragraph(v["step_name"], small),
+            Paragraph(f"{_esc(str(v['pattern_code']))}<br/>{_esc(str(v['pattern_name']))}", small),
+            Paragraph(_esc(str(v["step_name"])), small),
             Paragraph(str(v["layer"]), small),
             Paragraph(tier, small),
             Paragraph(f"{v['confidence']*100:.0f}%", small),
-            Paragraph(v["explanation"], small),
+            Paragraph(_esc(str(v["explanation"])), small),
         ])
 
     # Column widths sum to 508pt, just inside the 510pt of usable width an A4

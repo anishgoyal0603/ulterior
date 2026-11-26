@@ -32,3 +32,9 @@ evidence/
 .vscode/
 .idea/
 .DS_Store
+
+# ---- Extension packages (made by scripts/package_extension.py) ----
+dist/
+
+# ---- Screenshot runs (made by scripts/capture_screenshots.py) ----
+/screenshots/20*/

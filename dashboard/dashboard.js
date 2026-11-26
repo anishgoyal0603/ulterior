@@ -393,6 +393,7 @@ function showJob(job) {
   title.textContent = `Audit #${job.id} \u2014 ${job.site_name || job.adapter_name}`
     + (job.status === "done" ? "" : ` (${job.status})`);
   renderDiscovery(job.discovery);
+  document.getElementById("download-pdf").hidden = job.status !== "done";
   if (job.status === "failed") {
     const tbody = document.getElementById("violations-table");
     tbody.replaceChildren();
@@ -605,6 +606,74 @@ async function loadDashboard(opts) {
   else if (jobs.length) showJob(jobs[0]);
 }
 
+/**
+ * Save the selected audit's PDF. A link cannot send the X-API-Key header, so
+ * the file is fetched here and handed to the browser from memory.
+ */
+async function downloadReport() {
+  const btn = document.getElementById("download-pdf");
+  if (selectedJobId === null) return;
+  const opts = {headers: {}};
+  const key = apiKey();
+  if (key) opts.headers["X-API-Key"] = key;
+  btn.disabled = true;
+  try {
+    const r = await fetch(`${API}/audits/${Number(selectedJobId)}/report.pdf`, opts);
+    if (r.status === 401 || r.status === 403) { setAuthState(key ? "bad" : "locked"); askForKey(); return; }
+    if (!r.ok) throw new Error(`The report could not be made (${r.status}).`);
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ulterior-audit-${Number(selectedJobId)}.pdf`;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch (err) {
+    const status = document.getElementById("run-status");
+    status.textContent = err.message;
+    status.classList.add("is-error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/** Reports sent from the browser extension. Every field came from a page
+ *  someone visited and then from an unauthenticated POST, so every one goes
+ *  in as text. */
+async function loadReports() {
+  const rows = await authFetch("/extension-reports?limit=50");
+  const tbody = document.getElementById("reports-table");
+  tbody.replaceChildren();
+  document.getElementById("reports-count").textContent =
+    rows.length ? `${rows.length} most recent` : "";
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.className = "cov-note";
+    td.textContent = "No reports yet.";
+    tr.append(td);
+    tbody.append(tr);
+    return;
+  }
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    const cells = [
+      new Date(r.created_at + (String(r.created_at).endsWith("Z") ? "" : "Z")).toLocaleString(),
+      r.site, r.page_type || "",
+      (r.findings || []).map((f) => f.code).join(", "),
+      (r.findings && r.findings[0]) ? r.findings[0].title : "",
+    ];
+    for (const c of cells) {
+      const td = document.createElement("td");
+      td.textContent = String(c);
+      tr.append(td);
+    }
+    tbody.append(tr);
+  }
+}
+
 function openJobFromRow(e) {
   const tr = e.target.closest("tr.job-row");
   if (!tr) return;
@@ -647,7 +716,7 @@ async function boot() {
   // which is exactly what the old Chart.js dependency did when its CDN was
   // unreachable. Any real failure is still surfaced, once, in a banner.
   await loadCoverage().catch(showConnectionError);
-  const results = await Promise.allSettled([loadAdapters(), loadDashboard()]);
+  const results = await Promise.allSettled([loadAdapters(), loadDashboard(), loadReports()]);
   // A locked dashboard is shown by the key card and the gate, not by an
   // error banner: nothing is broken, it is waiting for a key.
   const failed = results.find(r => r.status === "rejected" && !(r.reason instanceof AuthError));
@@ -673,6 +742,7 @@ document.getElementById("api-key").addEventListener("keydown", (e) => {
   if (e.key === "Enter") connect();
 });
 document.getElementById("jobs-table").addEventListener("click", openJobFromRow);
+document.getElementById("download-pdf").addEventListener("click", downloadReport);
 document.getElementById("jobs-table").addEventListener("keydown", (e) => {
   if (e.key === "Enter") openJobFromRow(e);
 });

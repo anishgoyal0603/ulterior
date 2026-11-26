@@ -1,0 +1,19 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Kurta Co - Bag</title>
+<link rel="stylesheet" href="../fixture.css">
+<style>.ck{display:inline-block;width:16px;height:16px;border:2px solid #555;border-radius:3px;vertical-align:middle}
+.ck[aria-checked=true]{background:#e8473f;border-color:#e8473f}.l{display:flex;justify-content:space-between;padding:6px 0}</style>
+</head><body>
+<header>Kurta Co (fictional test site - app-style markup)</header>
+<main><div class="card" id="app"></div></main>
+<script>
+  setTimeout(() => {
+    document.getElementById("app").innerHTML =
+      '<h1>Your bag</h1>' +
+      '<div class="l"><div>Cotton kurta · 1 item</div><div>₹799</div></div>' +
+      '<div class="l"><div><span class="ck" role="checkbox" aria-checked="true" tabindex="0"></span> Gift wrap this order for ₹35</div><div>₹35</div></div>' +
+      '<div class="l"><div>Platform Fee</div><div>₹20</div></div>' +
+      '<div class="l"><div>Handling Fee</div><div>₹9</div></div>' +
+      '<div class="l"><div><b>To Pay</b></div><div><b>₹863</b></div></div>' +
+      '<div role="button" class="btn">PLACE ORDER</div>';
+  }, 300);
+</script></body></html>

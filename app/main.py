@@ -219,6 +219,36 @@ def get_audit(job_id: int = PathParam(..., ge=1, lt=2**63, description="Audit jo
     return _to_job_out(job)
 
 
+@app.get("/audits/{job_id}/report.pdf", include_in_schema=False)
+def audit_report_pdf(job_id: int = PathParam(..., ge=1, lt=2**63, description="Audit job id"),
+                     db: Session = Depends(get_db), _key: str = Depends(require_api_key)):
+    """The audit as a PDF: what a pilot store's compliance officer or a
+    regulator actually reads. Same evidence, tiers and limitations as the
+    dashboard, with the legal framing printed on the first page.
+
+    Behind the API key like every other audit read. Generated on request, not
+    stored: the database already holds the findings, and a second copy on
+    disk would outlive the retention purge."""
+    import tempfile
+    from report.generator import generate_audit_report
+
+    job = db.get(models.AuditJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "done":
+        raise HTTPException(status_code=409, detail="This audit has not finished, so there is no report yet.")
+    violations = [_to_violation_out(v).model_dump() for v in job.violations]
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "report.pdf")
+        generate_audit_report(job.site_name or job.adapter_name, violations, path)
+        with open(path, "rb") as fh:
+            data = fh.read()
+    return Response(content=data, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="ulterior-audit-{job.id}.pdf"',
+        "Cache-Control": "no-store",
+    })
+
+
 @app.get("/audits", response_model=List[schemas.AuditJobOut])
 def list_audits(
     limit: int = Query(50, ge=1, le=200,
@@ -322,6 +352,125 @@ def _delete_evidence_files(job: models.AuditJob) -> None:
             pass
 
 
+@app.post("/extension-reports", status_code=201)
+def create_extension_report(payload: schemas.ExtensionReportIn, db: Session = Depends(get_db)):
+    """A page a browser-extension user chose to report.
+
+    No API key: the person reporting has none. What keeps it safe is the
+    shape (schemas.ExtensionReportIn -- a site name and at most twenty short
+    findings, nothing else accepted), a per-IP rate limit, redaction before
+    storage, and the retention purge. Nothing identifying the sender is
+    stored. Reports are only ever displayed behind the API key, escaped.
+    """
+    from .privacy import redact
+    findings = [{
+        "code": f.code, "tier": f.tier, "title": redact(f.title), "detail": redact(f.detail),
+        "evidence": {redact(k): redact(v) for k, v in f.evidence.items()},
+    } for f in payload.findings]
+    row = models.ExtensionReport(site=payload.site, version=payload.version,
+                                 page_type=payload.page_type, findings_json=json.dumps(findings))
+    db.add(row)
+    db.commit()
+    return {"id": row.id, "status": "received"}
+
+
+@app.get("/extension-reports", response_model=List[schemas.ExtensionReportOut])
+def list_extension_reports(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db),
+                           _key: str = Depends(require_api_key)):
+    """Reports from extension users, newest first -- the queue a person
+    reviews before any of it is believed or repeated."""
+    rows = (db.query(models.ExtensionReport)
+            .order_by(models.ExtensionReport.created_at.desc()).limit(limit).all())
+    return [schemas.ExtensionReportOut(id=r.id, created_at=r.created_at, site=r.site, version=r.version,
+                                       page_type=r.page_type, findings=json.loads(r.findings_json or "[]"))
+            for r in rows]
+
+
+# ------------------------------------------------------ community prices
+# Prices that extension users chose to share (off by default in the
+# extension). No key: the people sending have none. Kept safe by the shapes in
+# schemas.Price*, the site list in app/community.py, rate limits, one report
+# per sender per product per day, and daily MEDIANS on the way out.
+
+@app.post("/prices", status_code=201)
+def add_prices(payload: schemas.PricesIn, request: Request, db: Session = Depends(get_db)):
+    from . import community
+    from .middleware import _client_ip
+    day = community.today()
+    sender = _client_ip(request)
+    stored = 0
+    for o in payload.observations:
+        site = community.site_of_key(o.key)
+        if not site:
+            raise HTTPException(status_code=422, detail="Unsupported product id.")
+        if not community.seen_today.first_time(sender, o.key, day):
+            continue
+        db.add(models.PriceObservation(product_key=o.key, site=site, price=float(o.price), observed_on=day))
+        stored += 1
+    db.commit()
+    return {"stored": stored}
+
+
+@app.post("/prices/history")
+def price_history(payload: schemas.PriceHistoryIn, db: Session = Depends(get_db)):
+    from . import community
+    if not community.site_of_key(payload.key):
+        raise HTTPException(status_code=422, detail="Unsupported product id.")
+    rows = (db.query(models.PriceObservation.observed_on, models.PriceObservation.price)
+            .filter(models.PriceObservation.product_key == payload.key,
+                    models.PriceObservation.observed_on >= community.window_start(payload.days))
+            .order_by(models.PriceObservation.observed_on.asc()).limit(20000).all())
+    return {"key": payload.key, "daily": community.daily_medians(rows)}
+
+
+@app.post("/prices/latest")
+def price_latest(payload: schemas.PriceLatestIn, db: Session = Depends(get_db)):
+    """Today's (or the most recent of the last three days') median price for
+    each product -- what the extension's six-hourly watchlist check asks."""
+    from . import community
+    keys = [k for k in dict.fromkeys(payload.keys) if community.site_of_key(k)]
+    out = {}
+    if keys:
+        rows = (db.query(models.PriceObservation.product_key, models.PriceObservation.observed_on,
+                         models.PriceObservation.price)
+                .filter(models.PriceObservation.product_key.in_(keys),
+                        models.PriceObservation.observed_on >= community.window_start(3))
+                .limit(50000).all())
+        per = {}
+        for k, d, p in rows:
+            per.setdefault(k, []).append((d, p))
+        for k, rs in per.items():
+            last = community.daily_medians(rs)[-1]
+            out[k] = last
+    return {"prices": out}
+
+
+@app.post("/prices/drops")
+def price_drops(payload: schemas.PriceDropsIn, db: Session = Depends(get_db)):
+    """Products whose community price fell the most over the last few days:
+    first day's median against the latest day's, at least 5% down and at
+    least two reports on each of those days."""
+    from . import community
+    rows = (db.query(models.PriceObservation.product_key, models.PriceObservation.observed_on,
+                     models.PriceObservation.price)
+            .filter(models.PriceObservation.observed_on >= community.window_start(payload.days))
+            .limit(100000).all())
+    per = {}
+    for k, d, p in rows:
+        per.setdefault(k, []).append((d, p))
+    drops = []
+    for k, rs in per.items():
+        daily = community.daily_medians(rs)
+        if len(daily) < 2 or daily[0]["reports"] < 2 or daily[-1]["reports"] < 2:
+            continue
+        a, b = daily[0]["price"], daily[-1]["price"]
+        if b < a * 0.95:
+            drops.append({"key": k, "from": a, "to": b, "pct": round((a - b) / a * 100, 1),
+                          "reports": sum(x["reports"] for x in daily), "since": daily[0]["day"]})
+    drops.sort(key=lambda x: -x["pct"])
+    return {"drops": drops[:payload.limit]}
+
+
 @app.get("/coverage")
 def coverage():
     """The CCPA-13 coverage table, generated from the taxonomy itself.
@@ -387,6 +536,65 @@ _LANDING_INDEX = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__
                               "landing", "index.html")
 
 
+def _serve_page(path: str, request: Request) -> Response:
+    """A same-origin HTML page with revalidation and a 304 for an unchanged
+    copy -- what StaticFiles does for mounted pages, for a page with a route
+    of its own."""
+    page = FileResponse(path, media_type="text/html", stat_result=os.stat(path),
+                        headers={"Cache-Control": _cache_policy()})
+    etag = page.headers.get("etag")
+    if etag and etag in request.headers.get("if-none-match", ""):
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": _cache_policy()})
+    return page
+
+
+_PRIVACY_PAGE = os.path.join(os.path.dirname(_LANDING_INDEX), "privacy.html")
+
+
+@app.get("/privacy", include_in_schema=False)
+def privacy(request: Request):
+    """The privacy policy. The Chrome Web Store requires one at a public URL
+    for any extension that reads page content, and the extension's popup
+    links here."""
+    if not os.path.isfile(_PRIVACY_PAGE):
+        raise HTTPException(status_code=404, detail="Not found")
+    return _serve_page(_PRIVACY_PAGE, request)
+
+
+_EXTENSION_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "extension")
+_extension_zip_cache: dict = {}
+
+
+@app.get("/download/ulterior-extension.zip", include_in_schema=False)
+def download_extension():
+    """The browser extension as a zip, for installing before (or instead of)
+    the Chrome Web Store: unzip, chrome://extensions, Developer mode, Load
+    unpacked. Built from the same folder the server ships, so the download
+    can never be older than the site describing it."""
+    import io
+    import zipfile
+    if not os.path.isfile(os.path.join(_EXTENSION_DIR, "manifest.json")):
+        raise HTTPException(status_code=404, detail="Not found")
+    files = []
+    for base, _dirs, names in os.walk(_EXTENSION_DIR):
+        for n in sorted(names):
+            if n.endswith((".md", ".pyc")) or n.startswith("."):
+                continue
+            full = os.path.join(base, n)
+            files.append((os.path.relpath(full, _EXTENSION_DIR).replace(os.sep, "/"), full))
+    files.sort()
+    stamp = tuple((rel, os.path.getmtime(full), os.path.getsize(full)) for rel, full in files)
+    if _extension_zip_cache.get("stamp") != stamp:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for rel, full in files:
+                z.write(full, "ulterior-extension/" + rel)
+        _extension_zip_cache.update(stamp=stamp, data=buf.getvalue())
+    return Response(content=_extension_zip_cache["data"], media_type="application/zip",
+                    headers={"Content-Disposition": 'attachment; filename="ulterior-extension.zip"',
+                             "Cache-Control": _cache_policy()})
+
+
 @app.get("/", include_in_schema=False)
 def root(request: Request):
     """The front door.
@@ -402,18 +610,11 @@ def root(request: Request):
     old JSON rather than a 500, so the root still answers.
     """
     if os.path.isfile(_LANDING_INDEX):
-        page = FileResponse(_LANDING_INDEX, media_type="text/html",
-                            stat_result=os.stat(_LANDING_INDEX),
-                            headers={"Cache-Control": _cache_policy()})
         # no-cache asks the browser to check back on every visit; answering
         # an unchanged page with a body-less 304 is what keeps that cheap.
         # StaticFiles does this for every other page; a plain FileResponse
-        # does not, so it is done here with the ETag Starlette computed.
-        etag = page.headers.get("etag")
-        if etag and etag in request.headers.get("if-none-match", ""):
-            return Response(status_code=304,
-                            headers={"ETag": etag, "Cache-Control": _cache_policy()})
-        return page
+        # does not, so _serve_page does it with the ETag Starlette computed.
+        return _serve_page(_LANDING_INDEX, request)
     return {"status": "ok", "service": "Ulterior by The Odyssey"}
 
 
@@ -502,7 +703,9 @@ if os.path.isdir(_STOREFRONT_CLEAN_DIR):
 # That is a bad way to discover a problem thirty seconds before a demo, so
 # the server checks its own assets at startup and names the missing file.
 _REQUIRED_ASSETS = {
-    "landing": (_LANDING_DIR, ("index.html", "landing.css", "landing.js")),
+    "landing": (_LANDING_DIR, ("index.html", "privacy.html", "landing.css", "landing.js")),
+    "extension": (_EXTENSION_DIR, ("manifest.json", "background.js", "popup.html", "popup.js",
+                                   "icons/icon128.png", "src/core.js", "src/content.js")),
     "demo": (_DEMO_DIR, ("index.html", "demo.css", "demo.js")),
     "dashboard": (_DASHBOARD_DIR, ("index.html", "dashboard.css", "dashboard.js")),
     "storefront": (_STOREFRONT_DIR, ("listing.html", "cart.html", "checkout.html", "shop.css")),

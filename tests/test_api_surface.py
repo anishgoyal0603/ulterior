@@ -572,3 +572,144 @@ def test_a_304_repeats_the_page_policy_and_never_the_api_one(monkeypatch):
             again = client.get(path, headers={"If-None-Match": first.headers["etag"]})
             assert again.status_code == 304, path
             assert "content-security-policy" not in again.headers, path
+
+
+def test_the_audit_pdf_route_answers_honestly(client):
+    """404 for no audit, 409 for an audit still running, a real PDF when done."""
+    from app.db import SessionLocal
+    from app import models
+    assert client.get("/audits/999999/report.pdf").status_code == 404
+    with SessionLocal() as db:
+        running = models.AuditJob(adapter_name="hosted_dark_demo", status="running")
+        done = models.AuditJob(adapter_name="hosted_dark_demo", site_name="Shop <b>&amp; Co",
+                               status="done")
+        db.add_all([running, done])
+        db.commit()
+        db.add(models.ViolationRecord(job_id=done.id, pattern_code="DP-03", pattern_name="Confirm Shaming",
+                                      step_name="cart <x>", confidence=0.6, layer=3,
+                                      explanation='Decline reads "No <i>thanks</i> & bye"',
+                                      evidence_json='{"evidence_tier": "indicative"}'))
+        db.commit()
+        running_id, done_id = running.id, done.id
+    assert client.get(f"/audits/{running_id}/report.pdf").status_code == 409
+    r = client.get(f"/audits/{done_id}/report.pdf")
+    assert r.status_code == 200, r.text[:300]
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content[:5] == b"%PDF-"
+    assert "no-store" in r.headers["cache-control"]
+
+
+def test_the_privacy_page_and_extension_download_are_served(client):
+    r = client.get("/privacy")
+    assert r.status_code == 200 and "text/html" in r.headers["content-type"]
+    assert "is not\n      sent to us" in r.text or "is not sent to us" in r.text
+    assert "storage.local" in r.text and "Report this page" in r.text
+    z = client.get("/download/ulterior-extension.zip")
+    assert z.status_code == 200 and z.headers["content-type"] == "application/zip"
+    import io, zipfile
+    names = zipfile.ZipFile(io.BytesIO(z.content)).namelist()
+    assert "ulterior-extension/manifest.json" in names
+    assert "ulterior-extension/icons/icon128.png" in names
+    assert not any(n.endswith(".md") for n in names)
+
+
+def test_a_privacy_page_304_keeps_the_page_policy(client):
+    """/privacy is a page without a trailing slash or .html, so the 304 rule
+    has to know it by name -- otherwise a revisit could repeat the old bug."""
+    from app.middleware import _is_document_path
+    assert _is_document_path("/privacy")
+    assert not _is_document_path("/audits")
+
+
+def test_extension_reports_accept_only_the_small_shape_they_promise(client):
+    """The one write endpoint without an API key: everything outside the
+    documented shape is refused, and personal details are redacted."""
+    ok = {"site": "makemytrip.com", "version": "2.1.0", "page_type": "checkout",
+          "findings": [{"code": "DP-08", "tier": "corroborated", "title": "Fees for a@b.co",
+                        "detail": "Call 9876543210", "evidence": {"fees": "Convenience fee ₹350"}}]}
+    r = client.post("/extension-reports", json=ok)
+    assert r.status_code == 201, r.text
+    stored = client.get("/extension-reports").json()[0]
+    assert "a@b.co" not in str(stored) and "9876543210" not in str(stored)
+
+    bad = [
+        dict(ok, url="https://www.makemytrip.com/review?id=1"),          # no URLs, ever
+        dict(ok, site="https://evil.example/"),
+        dict(ok, findings=[]),
+        dict(ok, findings=[dict(ok["findings"][0], code="DP-99")]),
+        dict(ok, findings=[dict(ok["findings"][0], tier="certain")]),
+        dict(ok, findings=[dict(ok["findings"][0], detail="x" * 601)]),
+        dict(ok, findings=[ok["findings"][0]] * 21),
+        dict(ok, findings=[dict(ok["findings"][0], evidence={str(i): "v" for i in range(11)})]),
+    ]
+    for b in bad:
+        assert client.post("/extension-reports", json=b).status_code == 422, b
+
+
+def test_extension_reports_are_listed_only_with_a_key(client, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "API_KEYS", ["k-for-test"])
+    assert client.get("/extension-reports").status_code == 401
+    assert client.get("/extension-reports", headers={"X-API-Key": "k-for-test"}).status_code == 200
+
+
+def test_community_prices_validate_dedup_and_use_medians(client, monkeypatch):
+    """Prices shared by extension users: only product ids of supported shops,
+    one report per sender per product per day, and a day's price is the
+    median of its reports -- so one absurd report cannot move it."""
+    from datetime import date
+    from app.db import SessionLocal
+    from app import models, community
+    import uuid
+    key = f"flipkart.com:MOB{uuid.uuid4().hex[:10]}"   # the test database outlives one run
+    assert client.post("/prices", json={"observations": [{"key": key, "price": 15999}]}).json() == {"stored": 1}
+    assert client.post("/prices", json={"observations": [{"key": key, "price": 1}]}).json() == {"stored": 0}
+    for bad in ({"key": "evil.example:x", "price": 10}, {"key": "flipkart.com:x y", "price": 10},
+                {"key": key, "price": 0}, {"key": key, "price": 10_000_001}):
+        assert client.post("/prices", json={"observations": [bad]}).status_code == 422, bad
+    assert client.post("/prices", json={"observations": [{"key": key, "price": 1, "url": "x"}]}).status_code == 422
+
+    with SessionLocal() as db:   # other people's reports today, one of them absurd
+        for p in (15999, 16099, 1):
+            db.add(models.PriceObservation(product_key=key, site="flipkart.com", price=p, observed_on=date.today()))
+        db.commit()
+    daily = client.post("/prices/history", json={"key": key}).json()["daily"]
+    assert daily[-1]["price"] == 15999 and daily[-1]["reports"] == 4, daily
+    latest = client.post("/prices/latest", json={"keys": [key, "amazon.in:NOPE"]}).json()["prices"]
+    assert list(latest) == [key]
+
+    monkeypatch.setattr(community.config, "IS_PRODUCTION", True)
+    assert community.site_of_key("127.0.0.1:/shop/x") is None, "test sites are refused in production"
+
+
+def test_community_drops_need_real_reports_on_both_days(client):
+    from datetime import date, timedelta
+    from app.db import SessionLocal
+    from app import models
+    def add(key, price, days_ago, n):
+        with SessionLocal() as db:
+            for _ in range(n):
+                db.add(models.PriceObservation(product_key=key, site=key.split(":")[0], price=price,
+                                               observed_on=date.today() - timedelta(days=days_ago)))
+            db.commit()
+    import uuid
+    real, thin = f"myntra.com:{uuid.uuid4().hex[:8]}", f"myntra.com:{uuid.uuid4().hex[:8]}"
+    add(real, 2000, 4, 2); add(real, 1500, 0, 2)    # a real 25% drop
+    add(thin, 2000, 4, 1); add(thin, 1000, 0, 1)    # one report each: ignored
+    drops = {d["key"]: d for d in client.post("/prices/drops", json={"days": 7, "limit": 50}).json()["drops"]}
+    assert drops[real]["pct"] == 25.0
+    assert thin not in drops
+
+
+def test_old_community_prices_are_purged(client, monkeypatch):
+    from datetime import date, timedelta
+    from app.db import SessionLocal
+    from app import models, config
+    from app.retention import purge_expired
+    with SessionLocal() as db:
+        db.add(models.PriceObservation(product_key="ajio.com:old1", site="ajio.com", price=10,
+                                       observed_on=date.today() - timedelta(days=config.COMMUNITY_RETENTION_DAYS + 5)))
+        db.commit()
+    purge_expired()
+    with SessionLocal() as db:
+        assert db.query(models.PriceObservation).filter_by(product_key="ajio.com:old1").count() == 0

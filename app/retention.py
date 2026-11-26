@@ -20,7 +20,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from .db import SessionLocal
-from .models import AuditJob
+from .models import AuditJob, ExtensionReport, PriceObservation
 from . import config
 
 logger = logging.getLogger(__name__)
@@ -69,6 +69,33 @@ def purge_expired() -> int:
                     _delete_evidence_files(job)
                     db.delete(job)
                     removed += 1
+
+        # Community prices: their own, longer age limit, and a count cap.
+        if config.COMMUNITY_RETENTION_DAYS > 0:
+            old = (datetime.now(timezone.utc) - timedelta(days=config.COMMUNITY_RETENTION_DAYS)).date()
+            (db.query(PriceObservation).filter(PriceObservation.observed_on < old)
+             .delete(synchronize_session=False))
+        if config.MAX_PRICE_OBSERVATIONS > 0:
+            extra = db.query(PriceObservation).count() - config.MAX_PRICE_OBSERVATIONS
+            if extra > 0:
+                ids = [r.id for r in db.query(PriceObservation.id).order_by(PriceObservation.id.asc()).limit(extra)]
+                (db.query(PriceObservation).filter(PriceObservation.id.in_(ids))
+                 .delete(synchronize_session=False))
+
+        # Extension reports: the same age limit, and their own count cap.
+        # (Not counted in the return value, which is about audits.)
+        if config.RETENTION_DAYS > 0:
+            (db.query(ExtensionReport)
+             .filter(ExtensionReport.created_at < cutoff_naive)
+             .delete(synchronize_session=False))
+        if config.MAX_STORED_EXTENSION_REPORTS > 0:
+            total = db.query(ExtensionReport).count()
+            excess = total - config.MAX_STORED_EXTENSION_REPORTS
+            if excess > 0:
+                ids = [r.id for r in db.query(ExtensionReport.id)
+                       .order_by(ExtensionReport.created_at.asc()).limit(excess)]
+                (db.query(ExtensionReport).filter(ExtensionReport.id.in_(ids))
+                 .delete(synchronize_session=False))
 
         db.commit()
     except Exception:

@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Deal of the day (real deadline)</title>
+<link rel="stylesheet" href="../fixture.css"></head><body>
+<header>DealDay (fictional test site)</header>
+<main><div class="card"><h1>Bluetooth speaker</h1>
+<p class="price">₹1,499</p><p>Offer ends in <b id="t">--:--</b></p>
+<button>Buy now</button></div></main>
+<script>
+  // A real deadline: fixed once, so a reload carries on where it left off.
+  let end = Number(localStorage.getItem("dealEnd"));
+  if (!end) { end = Date.now() + 600000; localStorage.setItem("dealEnd", String(end)); }
+  const t = document.getElementById("t");
+  function tick() { const s = Math.max(0, Math.round((end - Date.now())/1000));
+    t.textContent = String(Math.floor(s/60)).padStart(2,"0") + ":" + String(s%60).padStart(2,"0"); }
+  tick(); setInterval(tick, 1000);
+</script></body></html>

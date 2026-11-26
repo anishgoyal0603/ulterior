@@ -171,6 +171,25 @@ def test_a_pasted_url_gets_a_real_audit_with_findings_and_a_walk_report(dash):
     assert _script_errors(dash) == []
 
 
+def test_a_finished_audit_downloads_as_a_pdf(dash):
+    """The report a pilot store's compliance team reads. It has to arrive as a
+    real PDF through the key-protected route, from the button."""
+    p = dash.page
+    _connect(p)
+    p.select_option("#adapter-select", "hosted_dark_demo")
+    p.click("#run-audit")
+    assert "Done" in _wait_done(p)
+    p.wait_for_timeout(500)
+    assert p.is_visible("#download-pdf")
+    with p.expect_download(timeout=30000) as dl:
+        p.click("#download-pdf")
+    path = dl.value.path()
+    data = open(path, "rb").read()
+    assert data[:5] == b"%PDF-", data[:20]
+    assert len(data) > 2000
+    assert dl.value.suggested_filename.startswith("ulterior-audit-")
+
+
 def test_recent_audits_rows_open_their_own_findings(dash):
     p = dash.page
     _connect(p)

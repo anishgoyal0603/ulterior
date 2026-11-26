@@ -237,16 +237,16 @@ Stop the server first (**Ctrl+C**), then:
 Expect:
 
 ```
-286 passed, 36 deselected, 1 warning
+311 passed, 90 deselected, 1 warning
 ```
 
 ### Reading that line
 
-**`36 deselected` is not a problem, and there is nothing to remove.** It is
+**`90 deselected` is not a problem, and there is nothing to remove.** It is
 that command doing exactly what you asked. `-m "not ui"` means *skip the tests
-marked `ui`* — the 36 browser tests that launch a real server and drive a real
+marked `ui`* — the 90 browser tests that launch a real server and drive a real
 Chromium window. pytest is reporting how many it set aside on your
-instruction. Drop the flag and all 322 run.
+instruction. Drop the flag and all 401 run.
 
 **`1 warning` is also fine.** It comes from inside Starlette's own code, not
 this project. Ours are at zero and a test keeps them there.
@@ -270,12 +270,12 @@ About six minutes. Runs everything, including the browser tests:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests\ -q
-node tests\test_extension_cache.js
 ```
 
-Expect **322 passed** and **ALL TESTS PASSED** (12 checks on the browser
-extension; `node` is only needed for this one file — skip it if you have not
-installed Node).
+Expect every test to pass. The extension's own unit tests
+(`tests/extension_core.test.js`) run inside that command when Node.js is
+installed, and show as one **skipped** test when it is not — install Node from
+nodejs.org if you see that.
 
 A different number is worth reporting rather than working around. Many of
 these tests exist because a detector was accusing honest shops, and a green
@@ -333,12 +333,130 @@ That measures what YOU were shown. It is a customer documenting their own
 transaction rather than a robot hitting a server, it gets past the login
 because you logged in, and the evidence is a screenshot any human can check.
 
+Or simpler: install the browser extension (section 7c) and just shop. It does
+the same comparison live, in your own session.
+
 **Read `VERIFYING_A_FINDING.md` before repeating any finding to anyone.** It
 explains how to tell a real finding from a false one, and lists the four false
 positives this tool has actually produced so you know their shapes.
 
 `TESTING_REAL_SITES.md` has the full procedure, including how to audit a
 store running on your own machine.
+
+## 7c. The browser extension
+
+This is how Ulterior works on Amazon, Flipkart, BookMyShow, MakeMyTrip and the
+rest: not by our server crawling them, but inside **your own browser** while you
+browse normally. What you browse stays on your computer; the one exception is a
+report you choose to send (off unless you switch it on).
+
+It checks all 13 patterns — DP-05 (subscription trap) and DP-13 (rogue malware)
+partly, and it says so in the popup under **What Ulterior checks**. It reads
+English, Hindi and Hinglish.
+
+### Install it (2 minutes)
+
+**Chrome, Edge or Brave**
+
+1. Download it: the **Download for Chrome / Edge** button on the home page, or
+   `https://ulterior-api-production.up.railway.app/download/ulterior-extension.zip`.
+2. Unzip it. You get a folder called `ulterior-extension`.
+3. Open `chrome://extensions` (Edge: `edge://extensions`).
+4. Turn on **Developer mode**.
+5. Click **Load unpacked** and choose the `ulterior-extension` folder.
+6. Pin it: the puzzle-piece icon in the toolbar, then the pin next to Ulterior.
+
+**Firefox (140 or newer)**
+
+1. `.\.venv\Scripts\python.exe scripts\package_extension.py`
+2. Open `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on** → pick
+   `dist\ulterior-extension-2.1.0-firefox.zip`.
+3. Firefox asks for site access on first use: allow it for the shopping sites.
+   (A temporary add-on is removed when Firefox closes; a permanent install comes
+   from addons.mozilla.org once it is listed.)
+
+Working from the repository instead? Choose the repo's `extension` folder in
+step 5. After you change its code, press the circular arrow on its card in
+`chrome://extensions` and reload the shop's tab.
+
+### Try it in 30 seconds
+
+Open `https://ulterior-api-production.up.railway.app/storefront/product.html`,
+click **Add to Cart**, then **Proceed to Checkout**. The alert in the corner
+should report Basket Sneaking, Confirm Shaming and Interface Interference on the
+cart, and Drip Pricing (₹299 picked, ₹457 total) at checkout.
+
+### Test it on real shops (this is the important part)
+
+Use `docs\real-site-testing-sheet.csv` (opens in Excel). Shop the way you
+normally would on the listed sites — **stop before paying**. For each page,
+fill in what Ulterior showed and whether it was right:
+
+- **False alarm** — it flagged something that is fine.
+- **Missed** — the total went up at checkout and Ulterior said nothing, or said
+  "could not match that to named fees".
+- **Wrong price picked** — the "You picked" amount in the popup is not the price
+  you chose.
+
+For every false alarm or miss: click the toolbar icon, press **Copy evidence**
+and **Copy diagnostics** (bottom of the popup), paste both into the sheet's
+Notes column or a GitHub issue, and add a screenshot. Diagnostics say exactly
+what the checks read — page type, total, fees, price picked — which is what is
+needed to tune them for that site.
+
+The checks are built on generic page structure (amounts, fee labels, totals,
+pre-selected boxes, pop-ups), tested on fictional shops in
+`tests/extension_fixtures/`. They have **not** yet been checked against every
+real site's markup — your sheet is what turns "should work" into "works".
+
+### Price tracker and watchlist
+
+On every product page of a listed shop, the corner panel and the popup show:
+
+- **A price-history graph** — 15 days, 45 days, 90 days, 6 months or all. Hover
+  or use the arrow keys for each day's price; "Show the prices as a list" gives
+  the same numbers as text.
+- **"Is this a good price?"** — lowest in N days / below usual / about usual /
+  above usual, once there is at least a week of history.
+- **A fake-discount check** — "48% off M.R.P. ₹2,499, but it never sold above
+  ₹1,449 in 90 days".
+- **Watch price** — set the price you would pay. When the product is at or
+  under it, you get a notification (once per drop). **My watchlist** in the
+  popup opens a page with every watched product, its graph, and recent alerts.
+- **Compare prices** — the same product if you looked at it on another shop,
+  and one-click searches on other stores.
+
+Your own history starts from the first time you open a product. To get months
+of history from day one, switch on **Community prices** in the popup (off by
+default): the extension shares each product's id and price, and gets back the
+daily median of everyone's reports. With it on, the watchlist is also checked
+every six hours. Try it: `/prices/history` and `/prices/latest` on the server.
+
+### Reports from users (optional)
+
+In the popup, **Let me send reports to Ulterior** is off by default. Switching
+it on asks the browser for permission to contact our server. A **Report this
+page** button then appears when something is flagged; it shows the exact report
+and sends only on **Send**. Reports appear in the dashboard under **Reports from
+extension users** (API key needed) — check each one before repeating it.
+
+### Make the store uploads
+
+```powershell
+.\.venv\Scripts\python.exe scripts\package_extension.py
+```
+
+It checks the manifest, version and the network rule, then writes
+`dist\ulterior-extension-2.1.0-chrome-edge.zip` (Chrome Web Store and Edge
+Add-ons) and `dist\ulterior-extension-2.1.0-firefox.zip` (Firefox Add-ons).
+Everything the stores' forms ask for is in `extension\STORE_LISTING.md`; the
+screenshots are in `docs\store\`.
+
+### PDF reports for pilot stores
+
+In the dashboard, select a finished audit and press **PDF report**. Before
+auditing anyone's site from the server, get written permission:
+`docs\pilot-authorization-template.md`.
 
 ## 8. Making a change
 

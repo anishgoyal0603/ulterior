@@ -1,0 +1,27 @@
+<!doctype html><html><head><meta charset="utf-8"><title>SkyHop - Review your booking</title>
+<link rel="stylesheet" href="../fixture.css"></head><body>
+<header>SkyHop (fictional test site)</header>
+<main>
+<h1>Review your booking</h1>
+<p class="muted">Indore → Delhi · Airline Two · 1 Adult</p>
+<p class="card">Fare held for <b id="clock">10:00</b> - complete payment before the fare changes.</p>
+<div class="card">
+  <h3>Secure your trip?</h3>
+  <label><input type="radio" name="ins" value="yes" checked> Yes, secure my trip with travel insurance <b>₹199</b></label><br>
+  <label><input type="radio" name="ins" value="no"> No, I'll take the risk</label>
+</div>
+<div class="card">
+  <h3>Fare summary</h3>
+  <div class="row"><span>Base fare (1 Adult)</span><span>₹4,599</span></div>
+  <div class="row"><span>Convenience fee</span><span>₹350</span></div>
+  <div class="row"><span>Travel insurance</span><span>₹199</span></div>
+  <div class="row"><b>Total Amount</b><b>₹5,148</b></div>
+</div>
+<button id="pay">Proceed to pay ₹5,148</button>
+</main>
+<script>
+  // A "hold" timer that restarts from 10:00 every time the page loads.
+  let s = 600; const c = document.getElementById("clock");
+  setInterval(() => { s--; c.textContent = String(Math.floor(s/60)).padStart(2,"0") + ":" + String(s%60).padStart(2,"0"); }, 1000);
+</script>
+</body></html>

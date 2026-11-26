@@ -768,3 +768,18 @@ mark {
   *, *::before, *::after { animation: none !important; transition: none !important; }
   .js .reveal { opacity: 1; translate: none; }
 }
+
+/* ---------------------------------------------------------------- legal page */
+.legal { max-width: 760px; padding-top: 48px; padding-bottom: 72px; }
+.legal h1 { margin: 0 0 10px; font-size: clamp(30px, 4vw, 44px); line-height: 1.1; letter-spacing: -.03em; }
+.legal h2 { margin: 40px 0 10px; font-size: 24px; text-align: left; }
+.legal h3 { margin: 24px 0 6px; font-size: 17px; }
+.legal p, .legal li { color: var(--ink-2); font-size: 16px; }
+.legal ul { padding-left: 20px; }
+.legal li { margin: 0 0 8px; }
+.legal code { font-family: var(--mono, ui-monospace, Menlo, Consolas, monospace); font-size: .9em; background: var(--bg-soft); padding: 1px 5px; border-radius: 5px; }
+.legal a { color: var(--brand, #3538cd); }
+.legal-updated { font-size: 14px; color: var(--ink-3); }
+.legal-short { margin: 22px 0 8px; padding: 16px 18px; border-radius: 14px; background: var(--bg-soft); border: 1px solid var(--line); }
+.legal-short p { margin: 0; color: var(--ink); }
+.disclaimer a { color: inherit; }

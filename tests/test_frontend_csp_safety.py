@@ -26,6 +26,7 @@ import pytest
 ROOT = Path(__file__).parent.parent
 PAGES = [
     ("landing/index.html", ["landing.css", "landing.js"]),
+    ("landing/privacy.html", ["landing.css", "landing.js"]),
     ("demo/index.html", ["demo.css", "demo.js"]),
     ("dashboard/index.html", ["dashboard.css", "dashboard.js"]),
 ]

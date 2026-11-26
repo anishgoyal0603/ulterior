@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../fixture.css"><title>QuickKart home</title><style>.pop{position:fixed;top:20%;left:25%;width:50%;height:40%;background:#fff;border:2px solid #333;z-index:99;padding:20px}.pop[hidden]{display:none}</style></head><body>
+<header>QuickKart (fictional test site)</header><main><div class="card"><h1>Welcome</h1><p>Browse today's offers.</p></div></main>
+<div class="pop" id="pop" role="dialog" hidden><h2>Get 10% off your first order!</h2><p>Sign up with your phone number.</p><button id="close" aria-label="Close">×</button> <button>Sign up</button></div>
+<script>
+  const pop = document.getElementById("pop");
+  setTimeout(() => { pop.hidden = false; }, 800);
+  document.getElementById("close").addEventListener("click", () => {
+    pop.hidden = true;
+    setTimeout(() => { pop.hidden = false; }, 4000);   // ...and back it comes
+  });
+</script></body></html>

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy — Ulterior by The Odyssey</title>
+<meta name="description" content="What the Ulterior browser extension and website read, store and send. Short version: the extension sends nothing anywhere.">
+<link rel="stylesheet" href="/landing/landing.css?v=20261004">
+</head>
+<body>
+
+<header class="nav" id="top">
+  <div class="wrap nav-in">
+    <a class="brand" href="/" aria-label="Ulterior home">
+      <span class="logo-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M7.5 5.5v6.5a4.5 4.5 0 0 0 9 0V5.5"/><circle cx="12" cy="11.2" r="1.9"/></svg>
+      </span>
+      <span class="brand-text">Ulterior<small>by The Odyssey</small></span>
+    </a>
+    <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-menu">
+      <span class="sr-only">Menu</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <nav class="nav-menu" id="nav-menu" aria-label="Main">
+      <a href="/#how">How it works</a>
+      <a href="/#extension">Extension</a>
+      <a class="btn btn-primary" href="/demo/">Run a live audit</a>
+    </nav>
+  </div>
+</header>
+
+<main class="legal wrap">
+  <p class="eyebrow">Privacy</p>
+  <h1>What Ulterior reads, keeps and sends</h1>
+  <p class="legal-updated">Last updated 12 October 2026 &middot; applies to the Ulterior browser extension (version 2.2 and later) and this website.</p>
+
+  <div class="legal-short">
+    <p><strong>The short version.</strong> The extension works inside your browser. What you browse is not
+      sent to us or to anyone else &mdash; no page content, no browsing history, no analytics, no advertising
+      identifiers. Two features can send something, and both are off unless you switch them on (your browser
+      asks your permission first): a report of a page that you review and send yourself, and community
+      prices, which share the prices of products you open (product id and price only) to build price history
+      for everyone.</p>
+  </div>
+
+  <h2>1. The browser extension</h2>
+
+  <h3>What it reads</h3>
+  <p>On the shopping, food and travel sites listed in the extension (for example Amazon.in, Flipkart,
+    BookMyShow, MakeMyTrip), it reads the page you are looking at: prices, fee lines, totals, the text of
+    buttons and checkboxes, and whether options were already selected. On any other website it reads
+    nothing unless you press <em>Scan this page</em>, and then only that one page.</p>
+  <p>It never reads password fields and never asks for your password. It runs inside your own browser
+    session, so it sees what you see and nothing more.</p>
+
+  <h3>What it keeps, and where</h3>
+  <ul>
+    <li><strong>Results for open tabs, the price of the option you picked, countdown readings and pop-ups
+      you closed</strong> &mdash; held in your browser's memory (<code>storage.session</code>). They
+      disappear when you close the browser, and a page from one website can never read another website's.</li>
+    <li><strong>Your price history</strong> (optional, on by default) &mdash; for product pages you open: a
+      product identifier such as <code>amazon.in:B0XXXXXXXX</code>, the price, the date, any
+      &ldquo;only N left&rdquo; number the page showed, and a scrambled fingerprint of the product name
+      (each word turned into a short code) so the same product can be recognised on another shop for price
+      comparison. No product name, no page address, nothing about you. Stored only on your device
+      (<code>storage.local</code>), limited to 400 products and 180 days. Turn it off or clear it from the
+      extension's popup.</li>
+    <li><strong>Your watchlist</strong> &mdash; products you chose to watch: the product's name and link as you
+      saw them (the link without anything after a &ldquo;?&rdquo;), your target price, the prices seen, and the
+      price alerts you were shown. Up to 100 products, on your device only; remove any of them on the
+      watchlist page.</li>
+    <li><strong>Your settings</strong> (on-page alerts, price check, price history, community prices and
+      reporting on or off).</li>
+  </ul>
+  <p>Text quoted in a finding is passed through a redaction step that removes email addresses, phone
+    numbers, card-like numbers, PAN numbers and booking references before it is kept.</p>
+
+  <h3>What it sends</h3>
+  <p>The checks make no network requests. <em>Copy evidence</em> and <em>Copy diagnostics</em> put plain
+    text on your clipboard for you to paste wherever you choose; they name the website but deliberately
+    leave out the page address. <em>Compare prices</em> links are ordinary links that open a store's search
+    in a new tab only when you click one.</p>
+  <p><strong>Community prices (optional).</strong> If you switch on <em>Community prices</em> in the popup,
+    your browser first asks your permission to contact our server. After that, when you open a product page
+    on a listed shop, the extension sends that product's id (for example <code>amazon.in:B0XXXXXXXX</code>)
+    and the price shown &mdash; nothing else: no page address, no product name, no account, no cookies. In
+    return it fetches the community's daily prices for that product to draw a longer history, and every six
+    hours it asks for today's community price of the products on your watchlist, so it can tell you about a
+    drop. Our server stores the product id, the price and the date only &mdash; not your address or anything
+    that identifies you &mdash; and serves each day's price as the median of everyone's reports.</p>
+  <p><strong>Reports you choose to send.</strong> If you switch on <em>Let me send reports to Ulterior</em>
+    in the popup, your browser first asks your permission to contact our server. After that, a
+    <em>Report this page</em> button appears when something was flagged. It shows you the exact report
+    &mdash; the website's name, the page type (product, checkout or other), the extension version, the time,
+    and the findings with their evidence, already redacted &mdash; and sends it only when you press
+    <em>Send</em>. It never includes the page address, cookies, your account or anything that identifies
+    you. Switch reporting off at any time; the browser permission is removed with it.</p>
+
+  <h3>Why it asks for each permission</h3>
+  <ul>
+    <li><strong>Read and change data on the listed shopping and travel sites</strong> &mdash; to run its
+      checks there automatically. &ldquo;Change&rdquo; is used only to show the small Ulterior alert in
+      the corner of the page.</li>
+    <li><strong>activeTab and scripting</strong> &mdash; so <em>Scan this page</em> can check a site that
+      is not on the list, once, when you ask.</li>
+    <li><strong>storage</strong> &mdash; for the items listed above.</li>
+    <li><strong>alarms and notifications</strong> &mdash; to check your watchlist every six hours (only with
+      community prices on) and to tell you when a watched product reaches your target.</li>
+    <li><strong>Access to ulterior-api-production.up.railway.app</strong> (optional, asked for only when you
+      switch reporting or community prices on) &mdash; for those two features and nothing else.</li>
+  </ul>
+
+  <h3>Removing everything</h3>
+  <p>Uninstalling the extension deletes everything it stored. <em>Clear price history</em> in the popup
+    deletes the history at any time.</p>
+
+  <h2>2. This website and the audit service</h2>
+  <p>The live demo audits two practice storefronts that are part of this website. Its results are stored
+    in our database like any other audit.</p>
+  <p>The audit dashboard is for people we have given an access key. Audits run there visit the website
+    addresses entered, record what the pages showed, and store the findings with screenshots. Text taken
+    from audited pages is redacted before storage. Audits are deleted automatically after the retention period set on
+    the server (30 days by default), and only a limited number are kept.</p>
+  <p>Community prices are stored as product id, price and date, kept for about 13 months, and served as
+    daily medians. Nothing about who sent them is stored.</p>
+  <p>Reports sent from the extension are stored with the website name, page type, version and findings
+    only &mdash; not the sender's address or any identifier. They are read by the team, deleted after the
+    same retention period as audits, and only a limited number are kept.</p>
+  <p>The website sets no cookies and uses no analytics or advertising scripts. The server's access log
+    records requests (time, address, page) for operating and securing the service.</p>
+
+  <h2>3. What Ulterior's findings are</h2>
+  <p>Findings are automated observations that a page shows characteristics resembling patterns defined in
+    India's Guidelines for Prevention and Regulation of Dark Patterns, 2023. They are not a legal
+    determination about any business.</p>
+
+  <h2>4. Contact</h2>
+  <p>Ulterior is built by team The Odyssey (IIPS, DAVV, Indore). Questions or requests about this policy:
+    open an issue at
+    <a href="https://github.com/anishgoyal0603/ulterior/issues" target="_blank" rel="noopener noreferrer">github.com/anishgoyal0603/ulterior/issues</a>.
+    If this policy changes, the date at the top changes with it.</p>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p class="disclaimer"><strong>Observation tool, not a legal determination.</strong>
+      <a href="/">Home</a> &middot; <a href="/demo/">Live demo</a> &middot; <a href="/#extension">Extension</a></p>
+  </div>
+</footer>
+
+<script src="/landing/landing.js?v=20261004" defer></script>
+</body>
+</html>

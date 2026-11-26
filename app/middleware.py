@@ -151,6 +151,10 @@ _ROUTE_LIMITS = [
     # ORDER MATTERS: /dashboard/summary is a JSON API route that lives under
     # the same prefix as the dashboard's static files, so it is matched first.
     ("GET", "/dashboard/summary", lambda: config.RATE_LIMIT_POLL_PER_MINUTE, 60, "GET:/summary"),
+    ("POST", "/extension-reports", lambda: config.RATE_LIMIT_REPORTS_PER_MINUTE, 60, "POST:reports"),
+    # Community prices: the reads ("/prices/...") before the write ("/prices").
+    ("POST", "/prices/", lambda: config.RATE_LIMIT_PRICES_PER_MINUTE, 60, "POST:prices-read"),
+    ("POST", "/prices", lambda: config.RATE_LIMIT_PRICES_PER_MINUTE, 60, "POST:prices"),
     ("GET", "/demo-audit", lambda: config.RATE_LIMIT_POLL_PER_MINUTE, 60, "GET:poll"),
     ("GET", "/audits", lambda: config.RATE_LIMIT_POLL_PER_MINUTE, 60, "GET:poll"),
     ("GET", "/demo/", lambda: config.RATE_LIMIT_STATIC_PER_MINUTE, 60, "GET:static"),
@@ -224,12 +228,16 @@ def _is_document_path(path: str) -> bool:
     """Whether a URL on this app names an HTML document.
 
     Only needed for 304s, which carry no Content-Type to say so. Every HTML
-    page this app serves is either a directory index ("/", "/demo/",
-    "/dashboard/") or a .html file (the storefront fixtures). No JSON route
-    ends in "/" or ".html", and JSON routes never answer 304 anyway -- they
-    send no ETag.
+    page this app serves is a directory index ("/", "/demo/", "/dashboard/"),
+    a .html file (the storefront fixtures), or one of the named pages below.
+    No JSON route ends in "/" or ".html", and JSON routes never answer 304
+    anyway -- they send no ETag.
     """
-    return path.endswith("/") or path.endswith(".html")
+    return path.endswith("/") or path.endswith(".html") or path in _NAMED_PAGES
+
+
+# HTML pages served from a route of their own rather than a folder.
+_NAMED_PAGES = {"/privacy"}
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
