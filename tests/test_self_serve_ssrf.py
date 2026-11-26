@@ -11,6 +11,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
+
+# Every pasted-URL audit carries who allowed it (app/main.py).
+PERMISSION = {"owner_name": "Test Owner", "organisation": "Test Store", "authority": "owner", "confirmed": True}
 from fastapi.testclient import TestClient
 
 from app.db import init_db
@@ -34,13 +37,14 @@ def client(monkeypatch):
 def test_ssrf_attack_rejected_with_400_not_500(client):
     """The API layer, not just the standalone module -- confirms the
     HTTPException wiring actually works end to end."""
-    r = client.post("/audits", json={"target_urls": ["http://169.254.169.254/latest/meta-data/"]})
+    r = client.post("/audits", json={"target_urls": ["http://169.254.169.254/latest/meta-data/"],
+                                     "authorization": PERMISSION})
     assert r.status_code == 400
     assert "private/internal" in r.json()["detail"]
 
 
 def test_localhost_rejected(client):
-    r = client.post("/audits", json={"target_urls": ["http://localhost:5432/"]})
+    r = client.post("/audits", json={"target_urls": ["http://localhost:5432/"], "authorization": PERMISSION})
     assert r.status_code == 400
 
 
@@ -51,7 +55,7 @@ def test_neither_adapter_nor_urls_rejected(client):
 
 def test_both_adapter_and_urls_rejected(client):
     r = client.post("/audits", json={"adapter_name": "ecommerce_clean_demo",
-                                      "target_urls": ["https://example.com"]})
+                                      "target_urls": ["https://example.com"], "authorization": PERMISSION})
     assert r.status_code == 400
 
 
@@ -59,7 +63,7 @@ def test_legitimate_self_serve_url_accepted_and_queued(client):
     """A safe external URL should be accepted and actually queue a job --
     confirms this isn't just "SSRF checks work," but that the whole
     self-serve path (no adapter_name, just target_urls) functions."""
-    r = client.post("/audits", json={"target_urls": ["https://example.com/"]})
+    r = client.post("/audits", json={"target_urls": ["https://example.com/"], "authorization": PERMISSION})
     assert r.status_code == 200
     body = r.json()
     assert body["status"] in ("pending", "running", "done", "failed")

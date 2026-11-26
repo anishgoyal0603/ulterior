@@ -18,6 +18,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import re
 import pytest
+
+# Every pasted-URL audit carries who allowed it (app/main.py).
+PERMISSION = {"owner_name": "Test Owner", "organisation": "Test Store", "authority": "owner", "confirmed": True}
 from fastapi.testclient import TestClient
 
 from app import config
@@ -221,7 +224,8 @@ def test_target_urls_is_capped(client):
     """Every URL costs a blocking DNS resolution in the request handler and up
     to 30s of page load in a worker. Uncapped, one request could pin a worker
     for days and stall every other audit."""
-    r = client.post("/audits", json={"target_urls": [f"https://e{i}.example.com" for i in range(50)]})
+    r = client.post("/audits", json={"target_urls": [f"https://e{i}.example.com" for i in range(50)],
+                                     "authorization": PERMISSION})
     assert r.status_code == 422
 
 

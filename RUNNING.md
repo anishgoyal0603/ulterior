@@ -458,6 +458,27 @@ In the dashboard, select a finished audit and press **PDF report**. Before
 auditing anyone's site from the server, get written permission:
 `docs\pilot-authorization-template.md`.
 
+### Permission, evidence fingerprints and re-checks (2.3)
+
+1. **Permission is required for every pasted URL.** Fill the *Permission to
+   audit this site* box (who gave permission, store or company, on what basis,
+   optional reference such as "Signed form, 2 Dec 2026") and tick the
+   confirmation. The audit will not start without it. The try-it buttons fill
+   it in for the practice stores. The record is stored with the audit and
+   printed on its PDF.
+2. **Evidence fingerprints.** When an audit finishes, every screenshot and the
+   list of findings get a SHA-256 fingerprint. The PDF prints them, and the
+   **Verify evidence** button (or `GET /audits/{id}/verify-evidence`) checks
+   nothing has changed since. *Intact* = all matches; *incomplete* = old
+   screenshots were deleted by the retention policy; *changed* = do not rely on
+   that audit, run it again.
+3. **Re-check after fixes.** Audit the same pages again, open the new audit,
+   type the earlier audit's number in *Re-check against audit #* and press
+   **Compare**. You see what is no longer observed, still observed and new,
+   and the **PDF report** then includes that comparison.
+4. **Fix checklist.** Every PDF now ends with *Suggested fixes for developers*:
+   for each pattern found, what to change and how to check it.
+
 ## 8. Making a change
 
 Never commit directly to `main`. Once two people are pushing, whoever pushes

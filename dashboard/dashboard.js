@@ -341,10 +341,145 @@ function runUrlAudit() {
     status.classList.add("is-error");
     return;
   }
+  // Locked and no key typed: ask for the key first -- the permission box
+  // would be a pointless step before a request that can only 401.
+  if ((authState === "locked" || authState === "bad") && !apiKey()) {
+    askForKey();
+    return;
+  }
+  const authorization = readPermission();
+  if (!authorization) {
+    status.textContent = "Fill in who gave permission to audit this site, and tick the confirmation box.";
+    status.classList.add("is-error");
+    return;
+  }
   return startAudit({
     target_urls: urls,
     auto_discover: discover,
+    authorization,
   }, document.getElementById("run-urls"));
+}
+
+/**
+ * The permission record every pasted-URL audit needs. Returns null (and
+ * marks the box) when something required is missing; the server checks the
+ * same rules again.
+ */
+function readPermission() {
+  const box = document.getElementById("perm");
+  const owner = document.getElementById("perm-owner").value.trim();
+  const org = document.getElementById("perm-org").value.trim();
+  const confirmed = document.getElementById("perm-confirm").checked;
+  const ok = owner.length >= 2 && org.length >= 2 && confirmed;
+  box.classList.toggle("is-error", !ok);
+  if (!ok) {
+    (owner.length < 2 ? document.getElementById("perm-owner")
+      : org.length < 2 ? document.getElementById("perm-org")
+      : document.getElementById("perm-confirm")).focus();
+    return null;
+  }
+  return {
+    owner_name: owner,
+    organisation: org,
+    authority: document.getElementById("perm-authority").value,
+    reference: document.getElementById("perm-ref").value.trim(),
+    confirmed: true,
+  };
+}
+
+/** Fill the permission box for the built-in try-it targets, whose status is known. */
+function fillPermission(owner, org, authority) {
+  document.getElementById("perm-owner").value = owner;
+  document.getElementById("perm-org").value = org;
+  document.getElementById("perm-authority").value = authority;
+  document.getElementById("perm-ref").value = "";
+  document.getElementById("perm-confirm").checked = true;
+  document.getElementById("perm").classList.remove("is-error");
+}
+
+const AUTHORITY_TEXT = {
+  owner: "store owner",
+  written_permission: "written permission from the owner",
+  public_test_site: "public test site",
+};
+
+/** Permission record, evidence fingerprint and the re-check tools for one audit. */
+function renderTrust(job, changed) {
+  const host = document.getElementById("job-trust");
+  const done = job.status === "done";
+  host.hidden = !done;
+  if (changed) {
+    document.getElementById("trust-result").textContent = "";
+    document.getElementById("baseline-id").value = "";
+  }
+  if (!done) return;
+
+  const perm = document.getElementById("trust-perm");
+  perm.replaceChildren();
+  const b1 = document.createElement("strong");
+  b1.textContent = "Permission: ";
+  const a = job.authorization;
+  perm.append(b1, document.createTextNode(a
+    ? `${a.owner_name}, ${a.organisation} (${AUTHORITY_TEXT[a.authority] || a.authority})`
+      + (a.reference ? ` \u2014 ${a.reference}` : "")
+    : "not needed (registered demo or sandbox site)"));
+
+  const fp = document.getElementById("trust-print");
+  fp.replaceChildren();
+  const b2 = document.createElement("strong");
+  b2.textContent = "Evidence fingerprint: ";
+  const m = job.evidence_manifest;
+  const code = document.createElement("span");
+  code.className = "fp";
+  code.textContent = m ? m.fingerprint : "not available (audit made before fingerprints existed)";
+  fp.append(b2, code);
+  document.getElementById("verify-evidence").disabled = !m;
+}
+
+async function verifyEvidence() {
+  if (!selectedJobId) return;
+  const out = document.getElementById("trust-result");
+  out.textContent = "Checking\u2026";
+  try {
+    const v = await authFetch(`/audits/${Number(selectedJobId)}/verify-evidence`);
+    const shots = (v.screenshots || []);
+    const ok = shots.filter(s => s.status === "match").length;
+    const msg = {
+      intact: `Intact: all ${shots.length} screenshot(s) and the findings match their fingerprints.`,
+      incomplete: `Nothing altered, but ${shots.length - ok} of ${shots.length} screenshot(s) were deleted by the retention policy; the rest match.`,
+      changed: "Changed: some evidence no longer matches its fingerprint. Do not rely on this audit; run it again.",
+      unavailable: v.detail || "No fingerprints for this audit.",
+    }[v.status] || v.status;
+    out.textContent = msg;
+  } catch (err) {
+    out.textContent = "Could not verify: " + err.message;
+  }
+}
+
+/** Re-check after fixes: compare this audit with an earlier one of the same pages. */
+let baselineId = null;
+async function compareWithBaseline() {
+  if (!selectedJobId) return;
+  const out = document.getElementById("trust-result");
+  const n = Number(document.getElementById("baseline-id").value);
+  if (!Number.isInteger(n) || n < 1 || n === Number(selectedJobId)) {
+    out.textContent = "Enter the number of an earlier, finished audit of the same pages.";
+    return;
+  }
+  out.textContent = "Comparing\u2026";
+  try {
+    const c = await authFetch(`/audits/${Number(selectedJobId)}/compare?baseline=${n}`);
+    baselineId = n;
+    const names = (list) => list.map(i => `${i.pattern_code} (${i.step_name})`).join(", ") || "none";
+    out.textContent = `Since audit #${n}: ${c.resolved.length} no longer observed [${names(c.resolved)}]; `
+      + `${c.still_present.length} still observed [${names(c.still_present)}]; `
+      + `${c.new.length} new [${names(c.new)}].`
+      + (c.same_site ? "" : " Note: the two audits are of different sites.")
+      + " The PDF report will include this comparison.";
+  } catch (err) {
+    baselineId = null;
+    out.textContent = "Could not compare: " + err.message;
+  }
 }
 
 /**
@@ -388,11 +523,15 @@ function renderDiscovery(discovery) {
 /** Show one audit's findings in the bottom panel, and name which one it is. */
 let selectedJobId = null;
 function showJob(job) {
+  const selectedJobIdBefore = selectedJobId;
   selectedJobId = job.id;
   const title = document.getElementById("violations-title");
   title.textContent = `Audit #${job.id} \u2014 ${job.site_name || job.adapter_name}`
     + (job.status === "done" ? "" : ` (${job.status})`);
   renderDiscovery(job.discovery);
+  const changedJob = selectedJobIdBefore !== job.id;
+  if (changedJob) baselineId = null;
+  renderTrust(job, changedJob);
   document.getElementById("download-pdf").hidden = job.status !== "done";
   if (job.status === "failed") {
     const tbody = document.getElementById("violations-table");
@@ -618,7 +757,8 @@ async function downloadReport() {
   if (key) opts.headers["X-API-Key"] = key;
   btn.disabled = true;
   try {
-    const r = await fetch(`${API}/audits/${Number(selectedJobId)}/report.pdf`, opts);
+    const extra = baselineId ? `?baseline=${Number(baselineId)}` : "";
+    const r = await fetch(`${API}/audits/${Number(selectedJobId)}/report.pdf${extra}`, opts);
     if (r.status === 401 || r.status === 403) { setAuthState(key ? "bad" : "locked"); askForKey(); return; }
     if (!r.ok) throw new Error(`The report could not be made (${r.status}).`);
     const url = URL.createObjectURL(await r.blob());
@@ -743,6 +883,8 @@ document.getElementById("api-key").addEventListener("keydown", (e) => {
 });
 document.getElementById("jobs-table").addEventListener("click", openJobFromRow);
 document.getElementById("download-pdf").addEventListener("click", downloadReport);
+document.getElementById("verify-evidence").addEventListener("click", verifyEvidence);
+document.getElementById("compare-run").addEventListener("click", compareWithBaseline);
 document.getElementById("jobs-table").addEventListener("keydown", (e) => {
   if (e.key === "Enter") openJobFromRow(e);
 });
@@ -751,6 +893,11 @@ document.querySelectorAll("[data-try]").forEach((chip) => {
     const box = document.getElementById("target-urls");
     box.value = normaliseUrl(chip.dataset.try);
     document.getElementById("auto-discover").checked = true;
+    if (chip.dataset.try.startsWith("/")) {
+      fillPermission("Ulterior team", "Ulterior practice store", "owner");
+    } else {
+      fillPermission("Public test site", new URL(box.value).hostname, "public_test_site");
+    }
     box.focus();
   });
 });

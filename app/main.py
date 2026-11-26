@@ -27,6 +27,7 @@ from .middleware import (
 )
 from .auth import require_api_key, require_admin_key
 from .retention import purge_expired
+from .privacy import redact
 
 logger = logging.getLogger(__name__)
 
@@ -175,8 +176,46 @@ def _to_job_out(job: models.AuditJob) -> schemas.AuditJobOut:
         status=job.status, created_at=job.created_at, completed_at=job.completed_at,
         error_message=job.error_message,
         discovery=json.loads(job.discovery_json) if job.discovery_json else None,
+        authorization=json.loads(job.authorization_json) if job.authorization_json else None,
+        evidence_manifest=json.loads(job.evidence_manifest_json) if job.evidence_manifest_json else None,
         violations=[_to_violation_out(v) for v in job.violations],
     )
+
+
+def _stored_findings(job: models.AuditJob) -> list:
+    """The findings as stored, in the shape app/integrity.py hashes."""
+    return [{
+        "pattern_code": v.pattern_code, "pattern_name": v.pattern_name, "step_name": v.step_name,
+        "layer": v.layer, "confidence": v.confidence, "explanation": v.explanation,
+        "evidence": json.loads(v.evidence_json or "{}"),
+    } for v in job.violations]
+
+
+def _finished_job(db: Session, job_id: int) -> models.AuditJob:
+    job = db.get(models.AuditJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "done":
+        raise HTTPException(status_code=409, detail="This audit has not finished yet.")
+    return job
+
+
+def _authorization_record(payload: schemas.AuditJobCreate, key: str) -> dict:
+    """The permission record stored with the audit: what the person entered,
+    when the server received it, and which API key sent it (as a short hash,
+    never the key itself), so a report can say who vouched for the audit."""
+    from datetime import datetime, timezone
+    import hashlib
+    a = payload.authorization
+    return {
+        "owner_name": a.owner_name,
+        "organisation": a.organisation,
+        "authority": a.authority,
+        "reference": redact(a.reference),
+        "confirmed": True,
+        "recorded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "recorded_by_key": hashlib.sha256(key.encode("utf-8")).hexdigest()[:12],
+    }
 
 
 @app.get("/adapters")
@@ -196,10 +235,21 @@ def create_audit(payload: schemas.AuditJobCreate, db: Session = Depends(get_db),
             status_code=400,
             detail=f"Unknown adapter. Available: {sorted(ADAPTER_REGISTRY)}",
         )
+    if payload.target_urls and payload.authorization is None:
+        # Ulterior audits a pasted site only with its owner's permission (or a
+        # public test sandbox that invites automated testing). The permission
+        # is recorded with the audit and printed on its report.
+        raise HTTPException(
+            status_code=400,
+            detail="Auditing a pasted URL needs a permission record: who allowed it "
+                   "(owner_name, organisation, authority) and confirmed: true.",
+        )
     try:
         job_id = submit_audit_job(payload.adapter_name, payload.target_urls,
                                   use_llm=payload.use_llm,
-                                  auto_discover=payload.auto_discover)
+                                  auto_discover=payload.auto_discover,
+                                  authorization=_authorization_record(payload, _key)
+                                  if payload.authorization else None)
     except UnsafeURLError as e:
         # Safe to echo -- ssrf_guard's messages never contain internal
         # paths or secrets, only the rejected URL/hostname and the reason.
@@ -219,8 +269,48 @@ def get_audit(job_id: int = PathParam(..., ge=1, lt=2**63, description="Audit jo
     return _to_job_out(job)
 
 
+@app.get("/audits/{job_id}/verify-evidence")
+def verify_evidence(job_id: int = PathParam(..., ge=1, lt=2**63, description="Audit job id"),
+                    db: Session = Depends(get_db), _key: str = Depends(require_api_key)):
+    """Recompute the SHA-256 of every screenshot and of the stored findings,
+    and compare them with the fingerprints taken when the audit finished.
+
+    intact: nothing changed. changed: something no longer matches.
+    incomplete: nothing changed, but some screenshots were deleted (the
+    retention purge removes old evidence)."""
+    from capture.funnel_walker import DEFAULT_EVIDENCE_DIR
+    from .integrity import verify_manifest
+    job = _finished_job(db, job_id)
+    if not job.evidence_manifest_json:
+        return {"status": "unavailable", "detail": "This audit was run before evidence fingerprints existed."}
+    manifest = json.loads(job.evidence_manifest_json)
+    return verify_manifest(manifest, os.path.join(DEFAULT_EVIDENCE_DIR, f"job_{job.id}"),
+                           _stored_findings(job))
+
+
+@app.get("/audits/{job_id}/compare")
+def compare_audits(job_id: int = PathParam(..., ge=1, lt=2**63, description="The re-check audit"),
+                   baseline: int = Query(..., ge=1, lt=2**63, description="The earlier audit"),
+                   db: Session = Depends(get_db), _key: str = Depends(require_api_key)):
+    """A re-check after fixes: which observations from the earlier audit are
+    gone (resolved), which remain, and which are new."""
+    from .integrity import compare_findings
+    if baseline == job_id:
+        raise HTTPException(status_code=400, detail="Pick a different, earlier audit to compare with.")
+    current = _finished_job(db, job_id)
+    earlier = _finished_job(db, baseline)
+    result = compare_findings(_stored_findings(earlier), _stored_findings(current))
+    return {
+        "current_id": current.id, "baseline_id": earlier.id,
+        "same_site": (current.site_name or "") == (earlier.site_name or ""),
+        **result,
+    }
+
+
 @app.get("/audits/{job_id}/report.pdf", include_in_schema=False)
 def audit_report_pdf(job_id: int = PathParam(..., ge=1, lt=2**63, description="Audit job id"),
+                     baseline: int = Query(None, ge=1, lt=2**63,
+                                           description="Optional earlier audit to compare with"),
                      db: Session = Depends(get_db), _key: str = Depends(require_api_key)):
     """The audit as a PDF: what a pilot store's compliance officer or a
     regulator actually reads. Same evidence, tiers and limitations as the
@@ -238,9 +328,23 @@ def audit_report_pdf(job_id: int = PathParam(..., ge=1, lt=2**63, description="A
     if job.status != "done":
         raise HTTPException(status_code=409, detail="This audit has not finished, so there is no report yet.")
     violations = [_to_violation_out(v).model_dump() for v in job.violations]
+    comparison = None
+    if baseline is not None:
+        from .integrity import compare_findings
+        if baseline == job.id:
+            raise HTTPException(status_code=400, detail="Pick a different, earlier audit to compare with.")
+        earlier = _finished_job(db, baseline)
+        comparison = {"baseline_id": earlier.id,
+                      **compare_findings(_stored_findings(earlier), _stored_findings(job))}
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "report.pdf")
-        generate_audit_report(job.site_name or job.adapter_name, violations, path)
+        generate_audit_report(
+            job.site_name or job.adapter_name, violations, path,
+            job_id=job.id,
+            authorization=json.loads(job.authorization_json) if job.authorization_json else None,
+            manifest=json.loads(job.evidence_manifest_json) if job.evidence_manifest_json else None,
+            comparison=comparison,
+        )
         with open(path, "rb") as fh:
             data = fh.read()
     return Response(content=data, media_type="application/pdf", headers={

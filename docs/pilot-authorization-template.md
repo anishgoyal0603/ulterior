@@ -81,3 +81,11 @@ Date: ____ / ____ / 20____
 Name: ____________________ Signature: ____________________
 
 Date: ____ / ____ / 20____
+
+---
+
+**Recording it in Ulterior:** when you start the audit, enter the Business
+signatory's name in *Who gave permission*, the business name in *Store or
+company*, choose *Written permission from the owner*, and put the date of this
+signed form in *Reference* (for example "Signed form, 2 Dec 2026"). That record
+is printed on the report.

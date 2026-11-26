@@ -16,6 +16,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
+
+# Every pasted-URL audit carries who allowed it (app/main.py).
+PERMISSION = {"owner_name": "Test Owner", "organisation": "Test Store", "authority": "owner", "confirmed": True}
 from fastapi.testclient import TestClient
 
 from app.db import init_db
@@ -193,7 +196,7 @@ def test_the_dashboard_loads_no_script_from_another_origin(client):
 def test_self_serve_urls_are_accepted_by_the_api(client):
     """The dashboard's URL box posts target_urls. This asserts the contract it
     depends on: a list of public URLs is accepted and becomes a job."""
-    r = client.post("/audits", json={"target_urls": ["https://example.com/cart"]})
+    r = client.post("/audits", json={"target_urls": ["https://example.com/cart"], "authorization": PERMISSION})
     assert r.status_code == 200, r.text
     assert r.json()["adapter_name"] == "self-serve"
 
@@ -202,7 +205,7 @@ def test_self_serve_still_refuses_a_loopback_url(client):
     """The URL box must not become a way to make the server fetch its own
     internal network. The SSRF guard rejects it before a job is created, and
     the reason comes back readable so the UI can show it."""
-    r = client.post("/audits", json={"target_urls": ["http://127.0.0.1:8000/admin"]})
+    r = client.post("/audits", json={"target_urls": ["http://127.0.0.1:8000/admin"], "authorization": PERMISSION})
     assert r.status_code == 400
     assert "detail" in r.json()
 

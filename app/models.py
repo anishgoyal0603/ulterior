@@ -20,6 +20,12 @@ class AuditJob(Base):
     # reached, which it could not find, and why. Null for adapter-driven and
     # explicit-URL audits, which have nothing to discover.
     discovery_json = Column(Text, nullable=True)
+    # Who gave permission for this audit, recorded before it ran: required for
+    # every pasted-URL audit, empty for the registered demo/sandbox sites.
+    authorization_json = Column(Text, nullable=True)
+    # SHA-256 of every screenshot and of the stored findings, plus one
+    # fingerprint over all of it (app/integrity.py). Printed on the report.
+    evidence_manifest_json = Column(Text, nullable=True)
 
     # cascade: deleting a job must delete its violations in the same
     # operation. Without this, bulk-deleting children separately and then

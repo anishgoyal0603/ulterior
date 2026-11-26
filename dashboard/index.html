@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ulterior by The Odyssey — SIH26199</title>
-<link rel="stylesheet" href="dashboard.css?v=20261004b">
+<link rel="stylesheet" href="dashboard.css?v=20261126">
 </head>
 <body>
 
@@ -97,6 +97,29 @@
     <p class="consent">Audit sites you own, have permission to test, or public test sandboxes.
       Findings describe resemblance to a pattern in the Guidelines &mdash; not a legal finding.</p>
 
+    <!-- Permission record: required for every pasted-URL audit, stored with
+         it and printed on its PDF report. -->
+    <fieldset class="perm" id="perm">
+      <legend>Permission to audit this site <em>(required)</em></legend>
+      <div class="perm-grid">
+        <label>Who gave permission
+          <input id="perm-owner" type="text" maxlength="120" autocomplete="off" placeholder="e.g. Rashmi Sharma"></label>
+        <label>Store or company
+          <input id="perm-org" type="text" maxlength="160" autocomplete="off" placeholder="e.g. Example Store Pvt. Ltd."></label>
+        <label>On what basis
+          <select id="perm-authority">
+            <option value="written_permission">Written permission from the owner</option>
+            <option value="owner">I am the owner</option>
+            <option value="public_test_site">Public test site (invites automated testing)</option>
+          </select></label>
+        <label><span>Reference <span class="opt">(optional)</span></span>
+          <input id="perm-ref" type="text" maxlength="160" autocomplete="off" placeholder="e.g. Signed form, 2 Dec 2026"></label>
+      </div>
+      <label class="u3 check perm-confirm">
+        <input type="checkbox" id="perm-confirm"> I confirm this permission is real and covers the pages being audited.
+      </label>
+    </fieldset>
+
     <div class="discover">
       <label class="u3 switch">
         <input type="checkbox" id="auto-discover" checked>
@@ -168,6 +191,18 @@
     </div>
     <!-- How the crawl went. Hidden unless discovery ran. -->
     <div id="discovery-report" class="u9" hidden></div>
+    <!-- Permission record, evidence fingerprint and re-check, for the open audit. -->
+    <div id="job-trust" class="u9 trust" hidden>
+      <p id="trust-perm" class="disc-line"></p>
+      <p id="trust-print" class="disc-line"></p>
+      <div class="trust-actions">
+        <button id="verify-evidence" type="button">Verify evidence</button>
+        <label class="trust-compare">Re-check against audit #
+          <input id="baseline-id" type="number" min="1" step="1" inputmode="numeric" aria-label="Earlier audit number"></label>
+        <button id="compare-run" type="button">Compare</button>
+      </div>
+      <p id="trust-result" class="disc-note" role="status" aria-live="polite"></p>
+    </div>
     <div class="table-scroll">
       <table class="vtable">
         <thead><tr><th>Pattern</th><th>Step</th><th>Layer</th><th>Confidence</th><th>Explanation</th></tr></thead>
@@ -212,6 +247,6 @@
   </div>
 </footer>
 
-<script src="dashboard.js?v=20261004b" defer></script>
+<script src="dashboard.js?v=20261126" defer></script>
 </body>
 </html>

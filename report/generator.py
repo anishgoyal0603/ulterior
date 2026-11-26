@@ -7,7 +7,7 @@ from xml.sax.saxutils import escape as _esc
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, CondPageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -30,8 +30,22 @@ def _ensure_font():
         pass  # falls back to Helvetica (₹ will render as a box) if font truly unavailable
 
 
-def generate_audit_report(site_name: str, violations: list, output_path: str):
-    """violations: list of dicts matching schemas.ViolationOut shape."""
+_AUTHORITY_TEXT = {
+    "owner": "the store owner",
+    "written_permission": "written permission from the store owner",
+    "public_test_site": "a public test site that invites automated testing",
+}
+
+
+def generate_audit_report(site_name: str, violations: list, output_path: str, *,
+                          job_id=None, authorization=None, manifest=None, comparison=None):
+    """violations: list of dicts matching schemas.ViolationOut shape.
+
+    Optional extras, each printed only when given:
+      authorization -- the permission record stored with the audit
+      manifest      -- SHA-256 evidence fingerprints (app/integrity.py)
+      comparison    -- resolved / still present / new against an earlier audit
+    """
     _ensure_font()
     font_name = "DejaVuSans" if _FONT_REGISTERED else "Helvetica"
     font_bold = "DejaVuSans-Bold" if _FONT_REGISTERED else "Helvetica-Bold"
@@ -52,7 +66,10 @@ def generate_audit_report(site_name: str, violations: list, output_path: str):
     # either breaks the PDF ("paraparser: syntax error") or, worse, formats
     # it. Escape everything that came from outside.
     story.append(Paragraph(f"Dark Pattern Observation Report — {_esc(str(site_name))}", title_style))
-    story.append(Paragraph("Produced by Ulterior, built by team The Odyssey · SIH26199",
+    reference = f"Audit #{job_id}" if job_id else "Audit"
+    if manifest and manifest.get("fingerprint"):
+        reference += f" &nbsp;·&nbsp; evidence fingerprint {manifest['fingerprint'][:16]}"
+    story.append(Paragraph(f"Produced by Ulterior by The Odyssey &nbsp;·&nbsp; {reference}",
                            styles["Italic"]))
     story.append(Paragraph(
         f"Generated {datetime.now().strftime('%d %b %Y, %H:%M')} &nbsp;|&nbsp; "
@@ -78,14 +95,25 @@ def generate_audit_report(site_name: str, violations: list, output_path: str):
         "<b>Status of this document.</b> This is an automated observation report, not a "
         "legal determination. It records characteristics of the pages listed below that "
         "match the definitions in the 2023 Guidelines. It is produced by an unaffiliated "
-        "tool with no regulatory authority, was generated without the operator's "
-        "involvement, and reflects only the pages captured at the time and date above — "
+        "tool with no regulatory authority, and reflects only the pages captured at the "
+        "time and date above — "
         "which may since have changed. Nothing here should be read as a finding that any "
         "person or business has breached any law. Each observation below carries the "
         "evidence supporting it so that a reader can verify it independently.",
         small
     ))
     story.append(Spacer(1, 8))
+
+    # PERMISSION — who allowed this audit, as recorded before it ran.
+    if authorization:
+        auth_text = _AUTHORITY_TEXT.get(authorization.get("authority"), "permission recorded")
+        line = (f"<b>Permission to assess.</b> Recorded {_esc(str(authorization.get('recorded_at', '')))}: "
+                f"{_esc(str(authorization.get('owner_name', '')))} of "
+                f"{_esc(str(authorization.get('organisation', '')))}, on the basis of {auth_text}.")
+        if authorization.get("reference"):
+            line += f" Reference: {_esc(str(authorization['reference']))}."
+        story.append(Paragraph(line, small))
+        story.append(Spacer(1, 8))
 
     violations = sorted(violations, key=lambda v: v["confidence"], reverse=True)
 
@@ -144,6 +172,47 @@ def generate_audit_report(site_name: str, violations: list, output_path: str):
     ]))
     story.append(table)
 
+    # RE-CHECK — what changed since an earlier audit of the same pages.
+    if comparison:
+        story.append(Spacer(1, 14))
+        story.append(CondPageBreak(80))
+        story.append(Paragraph(f"Changes since audit #{comparison.get('baseline_id')}", small_bold))
+        story.append(Spacer(1, 4))
+        for label, key in (("No longer observed", "resolved"),
+                           ("Still observed", "still_present"),
+                           ("Newly observed", "new")):
+            items = comparison.get(key) or []
+            names = "; ".join(f"{_esc(str(i.get('pattern_code')))} {_esc(str(i.get('pattern_name') or ''))} "
+                              f"({_esc(str(i.get('step_name')))})" for i in items) or "none"
+            story.append(Paragraph(f"<b>{label} ({len(items)}):</b> {names}", small))
+            story.append(Spacer(1, 3))
+
+    # FIX CHECKLIST — one entry per pattern observed, for the store's developers.
+    from report.remediation import checklist_for
+    checklist = checklist_for([v["pattern_code"] for v in violations])
+    if checklist:
+        story.append(Spacer(1, 14))
+        story.append(CondPageBreak(140))   # never strand the heading at a page foot
+        story.append(Paragraph("Suggested fixes for developers", small_bold))
+        story.append(Paragraph(
+            "Suggestions for the business to consider, one per pattern observed above. "
+            "They are not legal advice; the business decides what its pages must do.", small))
+        story.append(Spacer(1, 4))
+        rows = [[Paragraph(h, small_bold) for h in ["Pattern", "What to change", "How to check"]]]
+        for code, name, fix, check in checklist:
+            rows.append([Paragraph(f"{code}<br/>{_esc(name)}", small),
+                         Paragraph(_esc(fix), small), Paragraph(_esc(check), small)])
+        fixes = Table(rows, colWidths=[78, 250, 180], repeatRows=1)
+        fixes.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a1a2e")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#cccccc")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        story.append(fixes)
+
     # LIMITATIONS — printed on every report, not kept in a README nobody
     # reading the PDF will ever see. A report that lists only what it found,
     # with no account of what it could not look at, invites the reader to
@@ -167,6 +236,29 @@ def generate_audit_report(site_name: str, violations: list, output_path: str):
     ]:
         story.append(Paragraph(f"• {limitation}", small))
         story.append(Spacer(1, 3))
+
+    # EVIDENCE INTEGRITY — the fingerprints a reader can check this report against.
+    if manifest:
+        story.append(Spacer(1, 14))
+        story.append(CondPageBreak(110))
+        story.append(Paragraph("Evidence integrity", small_bold))
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(
+            f"When this audit finished, each screenshot and the list of observations were "
+            f"fingerprinted with SHA-256 (captured {_esc(str(manifest.get('captured_at', '')))}). "
+            f"Anyone holding this report can ask the operator to re-check them; any change to the "
+            f"evidence changes the fingerprint. This shows the evidence has not been altered since "
+            f"capture. It is not a digital signature.", small))
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(f"<b>Report fingerprint:</b> <font face='Courier' size='7'>"
+                               f"{_esc(str(manifest.get('fingerprint', '')))}</font>", small))
+        story.append(Paragraph(f"<b>Observations ({manifest.get('findings_count', 0)}):</b> "
+                               f"<font face='Courier' size='7'>{_esc(str(manifest.get('findings_sha256', '')))}"
+                               f"</font>", small))
+        for shot in manifest.get("screenshots", []):
+            story.append(Paragraph(
+                f"<b>{_esc(str(shot.get('step')))}</b> ({_esc(str(shot.get('file')))}): "
+                f"<font face='Courier' size='7'>{_esc(str(shot.get('sha256')))}</font>", small))
 
     doc.build(story)
     return output_path

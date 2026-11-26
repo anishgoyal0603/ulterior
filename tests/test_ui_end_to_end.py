@@ -344,6 +344,7 @@ def test_auditing_a_pasted_url_with_discovery_reports_how_it_walked(server, dash
     p = dashboard.page
     assert p.is_checked("#auto-discover"), "discovery should be on by default"
     p.fill("#target-urls", f"{server}/storefront/listing.html")
+    _grant_permission(p)
     p.click("#run-urls")
     for _ in range(240):
         s = p.inner_text("#run-status")
@@ -364,6 +365,7 @@ def test_pressing_enter_in_the_url_box_starts_the_audit(server, dashboard):
     type a URL and hit Enter get silence."""
     p = dashboard.page
     p.fill("#target-urls", f"{server}/storefront/listing.html")
+    _grant_permission(p)
     p.press("#target-urls", "Enter")
     p.wait_for_timeout(1500)
     assert p.inner_text("#run-status").strip() != "", "Enter did nothing"
@@ -383,6 +385,7 @@ def test_an_unsafe_url_is_refused_with_the_reason_on_screen(dashboard):
     looks identical to a broken button."""
     p = dashboard.page
     p.fill("#target-urls", "http://169.254.169.254/latest/meta-data/")
+    _grant_permission(p)
     p.click("#run-urls")
     p.wait_for_timeout(2500)
     shown = (p.inner_text("#run-status") + " " + p.inner_text("body")).lower()
@@ -620,6 +623,7 @@ def test_starting_a_second_audit_does_not_strand_the_first_button(server, dashbo
     the rest of the session."""
     p = dashboard.page
     p.fill("#target-urls", f"{server}/storefront/listing.html")
+    _grant_permission(p)
     p.click("#run-urls")
     p.wait_for_timeout(700)
 
@@ -654,3 +658,10 @@ def test_the_demo_recovers_when_the_server_disappears_mid_poll(server, demo):
             break
     assert not p.is_disabled("#run"), "the demo button never came back"
     assert "Lost contact" in p.inner_text("#status"), p.inner_text("#status")
+
+
+def _grant_permission(p):
+    """Every pasted-URL audit needs a permission record (Ulterior 2.3)."""
+    p.fill("#perm-owner", "Test Owner")
+    p.fill("#perm-org", "Test Store")
+    p.check("#perm-confirm")

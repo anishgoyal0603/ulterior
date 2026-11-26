@@ -1,6 +1,37 @@
-from typing import Optional, List
+from typing import Optional, List, Dict, Literal
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class AuthorizationIn(BaseModel):
+    """Who allowed this site to be audited.
+
+    Required for every pasted-URL audit. Ulterior audits only sites whose
+    owner agreed (or public test sandboxes that invite automated testing),
+    and the report prints this record, so the permission travels with the
+    findings."""
+    model_config = ConfigDict(extra="forbid")
+
+    owner_name: str = Field(min_length=2, max_length=120)      # person who gave permission
+    organisation: str = Field(min_length=2, max_length=160)    # store or company
+    authority: Literal["owner", "written_permission", "public_test_site"]
+    reference: str = Field(default="", max_length=160)         # e.g. "Signed form, 2 Dec 2026"
+    confirmed: bool
+
+    @field_validator("confirmed")
+    @classmethod
+    def _must_confirm(cls, v):
+        if v is not True:
+            raise ValueError("confirm that you have permission to audit this site")
+        return v
+
+    @field_validator("owner_name", "organisation", "reference")
+    @classmethod
+    def _plain_text(cls, v):
+        v = " ".join(str(v).split())
+        if any(ch in v for ch in "<>"):
+            raise ValueError("plain text only")
+        return v
 
 
 class AuditJobCreate(BaseModel):
@@ -38,6 +69,10 @@ class AuditJobCreate(BaseModel):
     # studied, which is what made the multi-URL form useful only in theory.
     auto_discover: bool = False
 
+    # Required with target_urls (checked in app/main.py); not needed for the
+    # registered demo and sandbox sites.
+    authorization: Optional[AuthorizationIn] = None
+
 
 class ViolationOut(BaseModel):
     id: int
@@ -71,6 +106,10 @@ class AuditJobOut(BaseModel):
     # it could not find, and why. Reported alongside the findings so an
     # incomplete walk is never mistaken for a clean result.
     discovery: Optional[dict] = None
+    # The permission record given when the audit was started, if any.
+    authorization: Optional[dict] = None
+    # Fingerprints of the evidence (app/integrity.py); null until it finishes.
+    evidence_manifest: Optional[dict] = None
     violations: List[ViolationOut] = []
 
     # model_config, not `class Config` -- the class-based form is the

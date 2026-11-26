@@ -404,3 +404,21 @@ tbody tr:hover td { background: var(--surface-2); }
 .card-head h2 { margin: 0; }
 #download-pdf { padding: 8px 12px; font-size: 13.5px; }
 #download-pdf svg.ico { width: 16px; height: 16px; }
+
+/* ---- permission record (required for pasted-URL audits) ---- */
+.perm { margin: 14px 2px 0; padding: 12px 14px 10px; border: 1px solid var(--line-2); border-radius: 12px; }
+.perm legend { padding: 0 6px; font-weight: 600; }
+.perm legend em { font-weight: 400; font-style: normal; opacity: .75; }
+.perm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 14px; }
+.perm-grid label { display: flex; flex-direction: column; gap: 4px; font-size: .9em; }
+.perm-grid input, .perm-grid select { font: inherit; padding: 7px 9px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: inherit; }
+.perm-grid .opt { opacity: .7; }
+.perm-confirm { display: block; margin-top: 10px; }
+.perm.is-error { border-color: #d14343; }
+
+/* ---- evidence fingerprint and re-check, for the open audit ---- */
+.trust { margin-top: 10px; }
+.trust-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 6px 0; }
+.trust-compare { display: inline-flex; align-items: center; gap: 6px; }
+.trust-compare input { width: 6em; font: inherit; padding: 5px 7px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: inherit; }
+.fp { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .85em; word-break: break-all; }

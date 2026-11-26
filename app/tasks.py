@@ -34,6 +34,7 @@ from .db import SessionLocal
 from .models import AuditJob, ViolationRecord
 from .registry import ADAPTER_REGISTRY
 from .privacy import redact, redact_evidence, redact_list
+from .integrity import build_manifest
 from .ssrf_guard import validate_target_url, UnsafeURLError
 
 logger = logging.getLogger(__name__)
@@ -132,18 +133,32 @@ def _run_job(job_id: int, adapter_name: Optional[str], target_urls: Optional[Lis
         job.status = "done"
         job.completed_at = datetime.now(timezone.utc)
 
+        stored = []
         for v in violations:
             # PRIVACY: everything derived from captured page content is
             # redacted before it touches the database. Numeric evidence
             # (prices, contrast ratios, pixel dimensions) survives intact —
             # that's the actual proof of a violation and carries no PII.
-            db.add(ViolationRecord(
+            evidence_json = json.dumps(redact_evidence(v.evidence))
+            record = ViolationRecord(
                 job_id=job.id, pattern_code=v.pattern_code, pattern_name=v.pattern_name,
                 step_name=v.step_name, confidence=v.confidence, layer=v.layer,
                 explanation=redact(v.explanation),
-                evidence_json=json.dumps(redact_evidence(v.evidence)),
+                evidence_json=evidence_json,
                 screenshot_path=trace.screenshots.get(v.step_name.split(" -> ")[0]),
-            ))
+            )
+            db.add(record)
+            stored.append({
+                "pattern_code": record.pattern_code, "step_name": record.step_name,
+                "layer": record.layer, "confidence": record.confidence,
+                "explanation": record.explanation, "evidence": json.loads(evidence_json),
+            })
+
+        # Fingerprint the evidence exactly as stored, in the same commit as the
+        # findings, so a report can later be checked against it.
+        job.evidence_manifest_json = json.dumps(
+            build_manifest(job.id, site_name, trace.screenshots, stored)
+        )
         db.commit()
     except Exception as e:
         # SECURITY: never persist or return the raw exception/traceback to a
@@ -205,7 +220,8 @@ def _run_job(job_id: int, adapter_name: Optional[str], target_urls: Optional[Lis
 
 
 def submit_audit_job(adapter_name: Optional[str] = None, target_urls: Optional[List[str]] = None,
-                     use_llm: bool = False, auto_discover: bool = False) -> int:
+                     use_llm: bool = False, auto_discover: bool = False,
+                     authorization: Optional[dict] = None) -> int:
     if not adapter_name and not target_urls:
         raise ValueError("Provide either adapter_name or target_urls.")
     if adapter_name and target_urls:
@@ -221,7 +237,8 @@ def submit_audit_job(adapter_name: Optional[str] = None, target_urls: Optional[L
             validate_target_url(url)  # raises UnsafeURLError on anything unsafe
 
     db = SessionLocal()
-    job = AuditJob(adapter_name=adapter_name or "self-serve", status="pending")
+    job = AuditJob(adapter_name=adapter_name or "self-serve", status="pending",
+                   authorization_json=json.dumps(authorization) if authorization else None)
     db.add(job)
     db.commit()
     db.refresh(job)
