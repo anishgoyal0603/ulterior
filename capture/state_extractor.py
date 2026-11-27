@@ -170,6 +170,12 @@ URGENCY_PATTERNS = [
 # its real 12.6:1, so DP-06 and DP-09 reported perfectly legible controls as
 # unreadable. The link extractor always did this correctly; the button and
 # disclosure-label extractors did not, and now they share this one definition.
+# Effective opacity: the product of the element's and its ancestors' CSS opacity.
+_OPACITY_JS = (
+    "el => { let o = 1, n = el; while (n && n.nodeType === 1) {"
+    " o *= parseFloat(getComputedStyle(n).opacity || '1'); n = n.parentElement; } return o; }"
+)
+
 _BG_WALK_JS = (
     "el => { let n = el; while (n) { const c = getComputedStyle(n).backgroundColor;"
     " if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') return c; n = n.parentElement; }"
@@ -232,7 +238,12 @@ _CURRENCY_CODE = r"(?:INR|USD|EUR|GBP|JPY|AUD|CAD|CHF|SGD|AED|SAR)"
 # Either grouped (6,530 / 12,34,567 / 1,234,567) or a plain run of digits
 # (5065). The grouped alternative comes first so it wins where both could
 # match, otherwise "6,530" would parse as 6.
-_AMOUNT = r"(?:\d{1,3}(?:[,\u00a0\s]\d{2,3})+|\d+)(?:\.\d{1,2})?"
+#
+# Only a COMMA (2-3 digits) or a no-break space (exactly 3 digits) groups
+# thousands. A plain space or a newline never does: "₹499 20% off" was read
+# as 49920, "₹499 10 left" as 49910 and "$29 30-day trial" as 2930.
+_AMOUNT = (r"(?:\d{1,3}(?:,\d{2,3})+(?![\d])|\d{1,3}(?:[\u00a0\u202f]\d{3})+(?![\d])|\d+)"
+           r"(?:\.\d{1,2})?")
 _MONEY_RE = re.compile(
     rf"{_CURRENCY}\s*({_AMOUNT})"                  # ₹ 6,530   $19.99   € 40
     rf"|({_AMOUNT})\s*/-"                          # 6,530/-  (Indian convention)
@@ -290,7 +301,7 @@ def parse_money(text: str):
     if not match:
         return None
     raw = match.group(1) or match.group(2) or match.group(3)
-    cleaned = re.sub(r"[,\u00a0\s]", "", raw)
+    cleaned = re.sub(r"[,\u00a0\u202f]", "", raw)
     try:
         return float(cleaned)
     except ValueError:
@@ -313,6 +324,19 @@ def money_symbol(text: str) -> str:
         return ""
     found = re.search(_CURRENCY, match.group(0), re.IGNORECASE)
     return found.group(0) if found else ""
+
+
+def _currency_for_price(price, lines, full_text) -> str:
+    """The currency written next to the price that was extracted -- not the
+    first symbol anywhere on the page (a currency switcher or a promo banner
+    in another currency would otherwise set it)."""
+    if price is not None:
+        for line in lines or []:
+            if parse_money(line) == price:
+                symbol = money_symbol(line)
+                if symbol:
+                    return symbol
+    return money_symbol(full_text or "")
 
 
 def format_money(amount, currency: str = "") -> str:
@@ -411,17 +435,24 @@ _ROW_TEXT_JS = """
     return /[a-z]/i.test(label) && label.length <= 80;
   };
 
-  const rows = [];
-  const all = document.body ? document.body.querySelectorAll('*') : [];
-  for (const el of all) {
-    if (!qualifies(el)) continue;
-    // Innermost QUALIFYING element: if a descendant is also a label+amount
-    // row, this element is a container listing several rows.
-    let deeper = false;
-    for (const d of el.querySelectorAll('*')) {
-      if (qualifies(d)) { deeper = true; break; }
+  // One pass: decide each element once, then drop any element that has a
+  // qualifying descendant (it is a container listing several rows). The old
+  // version re-tested every descendant of every candidate -- O(n^2) innerText
+  // reads, which stalled Chromium on real storefronts with thousands of nodes.
+  const all = document.body ? Array.from(document.body.querySelectorAll('*')) : [];
+  const hits = all.filter(qualifies);
+  const hitSet = new Set(hits);
+  const hasDeeper = new Set();
+  for (const el of hits) {
+    let p = el.parentElement;
+    while (p && !hasDeeper.has(p)) {
+      if (hitSet.has(p)) hasDeeper.add(p);
+      p = p.parentElement;
     }
-    if (deeper) continue;
+  }
+  const rows = [];
+  for (const el of hits) {
+    if (hasDeeper.has(el)) continue;
     rows.push((el.innerText || '').replace(/\\s+/g, ' ').trim());
   }
   return rows;
@@ -440,6 +471,9 @@ def _dom_money_rows(page):
             seen.add(row)
             unique.append(row)
     return unique
+
+
+_SAVINGS_RE = re.compile(r"\b(you\s+)?(save|saved|saving|savings)\b", re.IGNORECASE)
 
 
 def _line_items_from_text(lines):
@@ -477,9 +511,16 @@ def _line_items_from_text(lines):
             continue
         if _TOTAL_WORDS.search(label):
             continue
+        # "You save ₹200" / "Savings: ₹200" restates a discount that is already
+        # in the prices; it is not a row of the breakdown, and adding it as a
+        # fee (or subtracting it twice) breaks the arithmetic DP-08 relies on.
+        if _SAVINGS_RE.search(label):
+            continue
         # A negative figure is a discount, and it belongs in the sum: a fee
         # breakdown that nets a discount against a charge must still add up.
-        if re.search(r"^-|\(-|\bless\b|\bdiscount", line, re.IGNORECASE):
+        # Whole words only: "Discounted price: ₹500" is a price, not a discount.
+        if re.search(r"^-|\(-|\bless\b|\b(discounts?|coupons?|promo(tions?|s)?|vouchers?)\b",
+                     line, re.IGNORECASE):
             amount = -abs(amount)
         items.append({"name": label, "price": amount})
     return items
@@ -517,27 +558,114 @@ def _relative_luminance(hex_or_rgb: str) -> float:
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
-def contrast_ratio(fg: str, bg: str) -> float:
+_RGBA_RE = re.compile(r"rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)")
+
+
+def _rgba(value: str):
+    m = _RGBA_RE.match((value or "").strip())
+    if not m:
+        return None
+    r, g, b = (float(m.group(i)) for i in (1, 2, 3))
+    a = float(m.group(4)) if m.group(4) is not None else 1.0
+    return r, g, b, max(0.0, min(1.0, a))
+
+
+def _over(top, base):
+    """Composite a colour with alpha over an opaque one."""
+    r, g, b, a = top
+    return (r * a + base[0] * (1 - a), g * a + base[1] * (1 - a), b * a + base[2] * (1 - a), 1.0)
+
+
+def blend_for_contrast(fg: str, bg: str, opacity: float = 1.0):
+    """The colours a reader actually sees.
+
+    A semi-transparent background sits on white; semi-transparent text, or
+    text inside an element with CSS opacity below 1, sits on its background.
+    Scoring rgba(0,0,0,0.15) as pure black made faint text look like 21:1."""
+    f, b = _rgba(fg), _rgba(bg)
+    if f is None or b is None:
+        return fg, bg
+    if b[3] < 1:
+        b = _over(b, (255.0, 255.0, 255.0, 1.0))
+    alpha = f[3] * max(0.0, min(1.0, opacity if opacity is not None else 1.0))
+    f = _over((f[0], f[1], f[2], alpha), b)
+    as_css = lambda c: f"rgb({round(c[0])}, {round(c[1])}, {round(c[2])})"  # noqa: E731
+    return as_css(f), as_css(b)
+
+
+def contrast_ratio(fg: str, bg: str, opacity: float = 1.0) -> float:
+    fg, bg = blend_for_contrast(fg, bg, opacity)
     l1, l2 = _relative_luminance(fg), _relative_luminance(bg)
     lighter, darker = max(l1, l2), min(l1, l2)
     return round((lighter + 0.05) / (darker + 0.05), 2)
 
 
-def _extract_schema_org_price(html: str) -> Optional[float]:
-    matches = re.findall(
-        r'<script type="application/ld\+json">(.*?)</script>', html, re.DOTALL
-    )
-    for raw in matches:
+_LD_JSON_RE = re.compile(
+    r"<script\b[^>]*\btype\s*=\s*[\"']?application/ld\+json[\"']?[^>]*>(.*?)</script>",
+    re.DOTALL | re.IGNORECASE)
+
+
+def _ld_number(value) -> Optional[float]:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = re.sub(r"[^\d.,]", "", value).replace(",", "")
         try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
+            return float(cleaned) if cleaned else None
+        except ValueError:
+            return None
+    return None
+
+
+def _ld_offer_price(offers) -> Optional[float]:
+    """price from an Offer, a list of Offers, or an AggregateOffer."""
+    if isinstance(offers, list):
+        for o in offers:
+            p = _ld_offer_price(o)
+            if p is not None:
+                return p
+        return None
+    if not isinstance(offers, dict):
+        return None
+    for key in ("price", "lowPrice"):
+        p = _ld_number(offers.get(key))
+        if p is not None:
+            return p
+    spec = offers.get("priceSpecification")
+    if isinstance(spec, list):
+        spec = spec[0] if spec else None
+    if isinstance(spec, dict):
+        return _ld_number(spec.get("price"))
+    return _ld_offer_price(offers.get("offers"))
+
+
+def _ld_nodes(data):
+    """Every object in a JSON-LD document: top-level arrays and @graph wrappers
+    (Yoast, WooCommerce, Shopify themes) included."""
+    stack = [data]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, list):
+            stack.extend(node)
+        elif isinstance(node, dict):
+            yield node
+            if "@graph" in node:
+                stack.append(node["@graph"])
+
+
+def _extract_schema_org_price(html: str) -> Optional[float]:
+    for raw in _LD_JSON_RE.findall(html or ""):
+        try:
+            data = json.loads(raw.strip())
+        except (json.JSONDecodeError, ValueError):
             continue
-        offers = data.get("offers") if isinstance(data, dict) else None
-        if isinstance(offers, dict) and "price" in offers:
-            try:
-                return float(offers["price"])
-            except (TypeError, ValueError):
-                continue
+        for node in _ld_nodes(data):
+            types = node.get("@type")
+            types = types if isinstance(types, list) else [types]
+            if "offers" in node or any(t in ("Product", "Offer", "AggregateOffer") for t in types):
+                p = _ld_offer_price(node.get("offers") if "offers" in node else node)
+                if p is not None:
+                    return p
     return None
 
 
@@ -555,11 +683,23 @@ def extract_page_state(page, step_name: str, price_selector_override: str = None
     # stating its own price unambiguously -- so they are still tried first,
     # and price_source records which one answered, so a reader of the evidence
     # can weigh a parsed figure differently from a declared one.
-    price = _extract_schema_org_price(html)
-    price_source = "schema_org" if price is not None else "not_found"
+    price, price_source = None, "not_found"
+    # An adapter's explicit selector is a human saying "the price is HERE";
+    # it wins over everything, including JSON-LD (which is often the list
+    # price, not the price on screen).
+    if price_selector_override:
+        el = page.query_selector(price_selector_override)
+        if el:
+            raw = el.get_attribute("data-price") or (el.inner_text() or "")
+            price = _ld_number(raw) if el.get_attribute("data-price") else parse_money(raw)
+            if price is not None:
+                price_source = "adapter_selector"
     if price is None:
-        override = price_selector_override or "[data-price]"
-        el = page.query_selector(override)
+        price = _extract_schema_org_price(html)
+        if price is not None:
+            price_source = "schema_org"
+    if price is None:
+        el = page.query_selector("[data-price]")
         if el:
             raw = el.get_attribute("data-price")
             if raw:
@@ -600,6 +740,16 @@ def extract_page_state(page, step_name: str, price_selector_override: str = None
     # checkboxes made the most common real form of that pattern invisible.
     checkboxes = []
     for el in page.query_selector_all("input[type=checkbox], input[type=radio]"):
+        # A control in a closed drawer or an unused template is not something
+        # the shopper was shown. Custom-styled checkboxes hide the <input>
+        # itself and show its <label>, so either being visible counts.
+        try:
+            shown = el.is_visible() or bool(el.evaluate(
+                "el => Array.from(el.labels || []).some(l => !!(l.offsetWidth || l.offsetHeight || l.getClientRects().length))"))
+        except Exception:
+            shown = True
+        if not shown:
+            continue
         cb_id = el.get_attribute("id") or ""
         input_type = (el.get_attribute("type") or "checkbox").lower()
         checked = el.is_checked()
@@ -609,13 +759,13 @@ def extract_page_state(page, step_name: str, price_selector_override: str = None
         # parent's innerText on a densely nested form can swallow the whole
         # fieldset and make every control look identical.
         label_text = ""
-        if cb_id:
-            try:
-                lbl = page.query_selector(f'label[for="{cb_id}"]')
-                if lbl:
-                    label_text = lbl.inner_text() or ""
-            except Exception:
-                label_text = ""
+        try:
+            # el.labels: the browser's own association, so an id containing
+            # quotes or backslashes cannot break (or inject into) a selector.
+            label_text = el.evaluate(
+                "el => Array.from(el.labels || []).map(l => l.innerText).join(' ')") or ""
+        except Exception:
+            label_text = ""
         if not label_text:
             try:
                 label_text = el.evaluate("el => el.parentElement.innerText") or ""
@@ -629,8 +779,15 @@ def extract_page_state(page, step_name: str, price_selector_override: str = None
 
     # --- buttons: geometry + contrast (Layer 2 raw material) ---
     buttons = []
-    for el in page.query_selector_all("button, a.btn-accept, a.btn-decline"):
-        text = (el.inner_text() or "").strip()
+    for el in page.query_selector_all(
+            "button, input[type=submit], input[type=button], [role=button], "
+            "a.btn-accept, a.btn-decline"):
+        try:
+            if not el.is_visible():
+                continue
+        except Exception:
+            continue
+        text = (el.inner_text() or "").strip() or (el.get_attribute("value") or "").strip()
         if not text:
             continue
         cls = el.get_attribute("class") or ""
@@ -643,11 +800,12 @@ def extract_page_state(page, step_name: str, price_selector_override: str = None
             bg = el.evaluate(_BG_WALK_JS)
             fg = el.evaluate("el => getComputedStyle(el).color")
             font_size = el.evaluate("el => parseFloat(getComputedStyle(el).fontSize)")
+            opacity = el.evaluate(_OPACITY_JS)
         except Exception:
-            bg, fg, font_size = "rgb(255,255,255)", "rgb(0,0,0)", 14.0
+            bg, fg, font_size, opacity = "rgb(255,255,255)", "rgb(0,0,0)", 14.0, 1.0
         buttons.append(ButtonInfo(
             text=text, role=role, bbox=box, font_size_px=font_size,
-            bg_color=bg, text_color=fg, contrast_ratio=contrast_ratio(fg, bg),
+            bg_color=bg, text_color=fg, contrast_ratio=contrast_ratio(fg, bg, opacity),
         ))
 
     urgency_found = []
@@ -669,6 +827,13 @@ def extract_page_state(page, step_name: str, price_selector_override: str = None
             text = (el.inner_text() or "").strip()
         except Exception:
             continue
+        if not text or len(text) > 20 or not disclosure_pattern.search(text):
+            continue
+        try:
+            if not el.is_visible():
+                continue
+        except Exception:
+            continue
         # Keep this to short standalone labels ("Ad", "Sponsored") -- not
         # paragraphs that happen to contain the word "ad" in running prose.
         if not text or len(text) > 20 or not disclosure_pattern.search(text):
@@ -678,10 +843,11 @@ def extract_page_state(page, step_name: str, price_selector_override: str = None
             bg = el.evaluate(_BG_WALK_JS)
             fg = el.evaluate("el => getComputedStyle(el).color")
             font_size = el.evaluate("el => parseFloat(getComputedStyle(el).fontSize)")
+            opacity = el.evaluate(_OPACITY_JS)
         except Exception:
             continue
         disclosure_labels.append(DisclosureLabel(
-            text=text, font_size_px=font_size, contrast_ratio=contrast_ratio(fg, bg), bbox=box,
+            text=text, font_size_px=font_size, contrast_ratio=contrast_ratio(fg, bg, opacity), bbox=box,
         ))
 
     modals = _extract_modals(page)
@@ -690,7 +856,7 @@ def extract_page_state(page, step_name: str, price_selector_override: str = None
 
     return PageState(
         url=page.url, step_name=step_name, price=price, price_source=price_source,
-        price_currency=money_symbol(full_text or ""),
+        price_currency=_currency_for_price(price, text_lines, full_text),
         line_items=line_items, checkboxes=checkboxes, buttons=buttons,
         full_text=full_text, urgency_phrases_found=urgency_found, raw_html=html,
         disclosure_labels=disclosure_labels,
@@ -737,13 +903,18 @@ def modal_signature(text: str, element_id: str = "", element_class: str = "") ->
     fire. Whitespace and digits are normalised out of the text fallback for
     the same reason.
     """
+    normalised = re.sub(r"\d+", "#", re.sub(r"\s+", " ", (text or "").strip().lower()))
     if element_id:
         return f"id:{element_id}"
     if element_class:
         cls = " ".join(sorted(c for c in element_class.split() if c))
         if cls:
-            return f"class:{cls}"
-    normalised = re.sub(r"\d+", "#", re.sub(r"\s+", " ", (text or "").strip().lower()))
+            # The class alone is not an identity: every unrelated popup on a
+            # site can be <div class="modal">, and two different requests would
+            # read as one repeated request (a false DP-10). Class plus the
+            # start of the text tells them apart; digits are normalised so a
+            # rotating "10% off" / "15% off" is still the same modal.
+            return f"class:{cls}|{normalised[:40]}"
     return f"text:{normalised[:80]}"
 
 

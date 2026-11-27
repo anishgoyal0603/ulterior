@@ -113,3 +113,51 @@ def require_admin_key(
             detail="This key is not authorised for destructive operations.",
         )
     return candidate
+
+
+# ----------------------------------------------------------- organisations
+#
+# 2.4: an API key belongs to one organisation (config.KEY_ORGS). Every audit
+# read, report, evidence check, comparison and deletion is filtered by it on
+# the server, so a key handed to one agency cannot reach another's audits --
+# whatever the dashboard shows or hides. Admin keys see every organisation.
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Caller:
+    key: str
+    org: str
+    admin: bool
+
+
+def caller_for_key(key: str) -> Caller:
+    if key == "auth-disabled-development":
+        return Caller(key=key, org=config.DEFAULT_ORG, admin=True)
+    org = config.KEY_ORGS.get(key, config.DEFAULT_ORG)
+    return Caller(key=key, org=org, admin=_key_matches(key, config.ADMIN_API_KEYS))
+
+
+def require_caller(
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+    x_api_key: Optional[str] = Header(default=None),
+) -> Caller:
+    """require_api_key, plus which organisation the key belongs to."""
+    return caller_for_key(require_api_key(request, authorization, x_api_key))
+
+
+def require_admin_caller(
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+    x_api_key: Optional[str] = Header(default=None),
+) -> Caller:
+    key = require_admin_key(request, authorization, x_api_key)
+    return caller_for_key(key)
+
+
+def can_see(caller: Caller, job_org: Optional[str]) -> bool:
+    if caller.admin:
+        return True
+    return (job_org or config.DEFAULT_ORG) == caller.org

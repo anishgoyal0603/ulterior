@@ -1,3 +1,5 @@
+> **Historical note (September 2026).** This file records the project as it was then; its test counts and to-do items are out of date. For the current state see `RUNNING.md`, `README.md` and `docs/operations.md`.
+
 # Ulterior — Dark Pattern Auditor — Project Handoff Document
 
 **Purpose of this document:** paste this entire file into a new chat to resume work

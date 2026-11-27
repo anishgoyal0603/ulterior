@@ -1,16 +1,24 @@
-# Production stack. The code in this repo currently uses SQLite + an
-# in-process ThreadPoolExecutor (see app/tasks.py) so it's runnable and
-# testable with zero infra. This compose file is the documented upgrade
-# path: swap SQLite -> Postgres and the thread pool -> Celery+Redis for
-# horizontal scaling and job durability across API restarts. The interface
-# in app/tasks.py (submit_audit_job) is written so this swap only touches
-# that one file.
+# Production-shaped stack: PostgreSQL, the API, and separate audit workers.
+#
+# Jobs are durable (2.4): the API stores each audit in PostgreSQL and the
+# workers claim them from there (app/tasks.py), so an API restart loses
+# nothing and a worker that dies is replaced by another picking its job up.
+# There is no Redis or Celery: PostgreSQL is the queue. Scale workers with
+#   docker compose up -d --scale worker=3
+#
+# Evidence (screenshots) lives on the shared `evidence` volume, so it
+# survives restarts and redeploys and the API can verify its fingerprints.
 
 version: "3.9"
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # Debian-based, NOT -alpine: the ssl settings below use Debian's
+    # self-signed "snakeoil" certificate, which the Alpine image does not
+    # ship -- on Alpine Postgres exits at boot with "could not load server
+    # certificate file". Replace it with a real certificate for anything
+    # beyond a private network.
+    image: postgres:16
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-darkpattern_auditor}
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
@@ -31,13 +39,6 @@ services:
       -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key
       -c password_encryption=scram-sha-256
 
-  redis:
-    image: redis:7-alpine
-    # SECURITY: not published to the host either. Redis has no auth by
-    # default -- an exposed 6379 is a well-known trivial compromise path.
-    expose: ["6379"]
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}"]
-
   api:
     build:
       context: .
@@ -47,37 +48,54 @@ services:
       APP_ENV: ${APP_ENV:-production}
       DEBUG: "false"
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set in .env}
-      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set in .env}
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:?CORS_ALLOW_ORIGINS must be set in .env}
+      # The API only queues audits; the worker service runs the browsers.
+      RUN_AUDIT_WORKERS: "false"
+      EVIDENCE_DIR: /data/evidence
+      MAX_ACTIVE_AUDITS_PER_ORG: ${MAX_ACTIVE_AUDITS_PER_ORG:-3}
       API_KEYS: ${API_KEYS:?API_KEYS must be set in .env — the app refuses to run unauthenticated}
-      ADMIN_API_KEYS: ${ADMIN_API_KEYS:-}
+      # Required in production (the app refuses to start without it): the
+      # key(s) allowed to delete and to see every organisation.
+      ADMIN_API_KEYS: ${ADMIN_API_KEYS:?ADMIN_API_KEYS must be set in .env}
+      # The public https address of this deployment; the public demo walks
+      # the practice storefront there.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL must be set in .env}
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
       RETENTION_DAYS: ${RETENTION_DAYS:-30}
       MAX_STORED_AUDITS: ${MAX_STORED_AUDITS:-500}
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    depends_on: [postgres, redis]
+    depends_on: [postgres]
     # Bind to loopback only: terminate TLS at a reverse proxy (nginx/Caddy/
     # a cloud load balancer) in front of this, rather than exposing the app
     # server directly to the internet over plain HTTP.
     ports: ["127.0.0.1:8000:8000"]
     volumes:
-      - evidence:/tmp/dp_evidence
+      - evidence:/data/evidence
 
   worker:
     build:
       context: .
       dockerfile: Dockerfile
-    command: celery -A app.celery_worker worker --loglevel=info --concurrency=4
+    command: python -m app.worker
     environment:
       APP_ENV: ${APP_ENV:-production}
       DEBUG: "false"
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set in .env}
-      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set in .env}
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:?CORS_ALLOW_ORIGINS must be set in .env}
+      API_KEYS: ${API_KEYS:?API_KEYS must be set in .env}
+      ADMIN_API_KEYS: ${ADMIN_API_KEYS:?ADMIN_API_KEYS must be set in .env}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL must be set in .env}
+      EVIDENCE_DIR: /data/evidence
+      AUDIT_WORKERS: ${AUDIT_WORKERS:-2}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    depends_on: [postgres, redis]
+    depends_on: [postgres]
+    # The worker runs a browser on untrusted sites: give it nothing extra.
+    # Network isolation through an egress proxy is the next step (see
+    # docs/operations.md); application-level guards are already in place.
+    security_opt: ["no-new-privileges:true"]
     volumes:
-      - evidence:/tmp/dp_evidence
+      - evidence:/data/evidence
 
 volumes:
   pgdata:

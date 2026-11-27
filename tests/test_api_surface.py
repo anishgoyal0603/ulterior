@@ -96,7 +96,8 @@ def test_dashboard_html_is_served_from_the_api_origin(client):
 def test_html_responses_get_a_csp_that_permits_the_dashboard(client):
     r = client.get("/dashboard/")
     csp = r.headers["Content-Security-Policy"]
-    assert "script-src 'self' 'unsafe-inline'" in csp
+    # Our own pages carry no inline script, so none is allowed on them.
+    assert "script-src 'self';" in csp and "script-src 'self' 'unsafe-inline'" not in csp
     # connect-src must stay same-origin: this is what stops a compromised
     # dependency exfiltrating audit data to another host.
     assert "connect-src 'self'" in csp

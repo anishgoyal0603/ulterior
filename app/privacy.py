@@ -46,7 +46,10 @@ _PATTERNS = [
 
     # Indian mobile numbers: 10 digits starting 6-9, allowing internal spaces
     # or hyphens (e.g. "98765 43210"), with optional +91 / 0 prefix.
-    (re.compile(r"(?:\+?91[\s-]?|\b0)?[6-9](?:[\s-]?\d){9}\b"), "[PHONE_REDACTED]"),
+    # Not preceded by a letter or digit: without that, the last ten digits of
+    # a SKU or order id ("SKU9876543210") were redacted as a phone number.
+    (re.compile(r"(?:\+?91[\s-]?|(?<![A-Za-z0-9])0|(?<![A-Za-z0-9]))[6-9](?:[\s-]?\d){9}\b"),
+     "[PHONE_REDACTED]"),
 
     # Indian PIN code preceded by an address-ish keyword (avoids nuking any
     # random 6-digit number such as an order id shown on the page).
@@ -68,23 +71,24 @@ def redact_list(items):
     return [redact(i) for i in items] if items else items
 
 
+def _redact_value(value):
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, dict):
+        return {k: _redact_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_value(v) for v in value]
+    return value
+
+
 def redact_evidence(evidence: dict) -> dict:
     """
-    Recursively redact string values inside an evidence dict before it is
-    persisted or returned via the API. Numeric evidence (prices, contrast
-    ratios, pixel sizes) is left untouched — it carries no PII and is the
-    actual proof of a violation.
+    Recursively redact every string inside an evidence dict -- at any depth,
+    including dicts inside lists (line items such as
+    [{"name": "Deliver to ...", "price": 50}]) -- before it is persisted or
+    returned via the API. Numeric evidence (prices, contrast ratios, pixel
+    sizes) is left untouched: it carries no PII and is the actual proof.
     """
     if not isinstance(evidence, dict):
         return evidence
-    cleaned = {}
-    for key, value in evidence.items():
-        if isinstance(value, str):
-            cleaned[key] = redact(value)
-        elif isinstance(value, list):
-            cleaned[key] = [redact(v) if isinstance(v, str) else v for v in value]
-        elif isinstance(value, dict):
-            cleaned[key] = redact_evidence(value)
-        else:
-            cleaned[key] = value
-    return cleaned
+    return _redact_value(evidence)

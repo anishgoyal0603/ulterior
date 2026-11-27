@@ -1,3 +1,5 @@
+> **Historical note (September 2026).** This file records the project as it was then; its test counts and to-do items are out of date. For the current state see `RUNNING.md`, `README.md` and `docs/operations.md`.
+
 # Pushing Ulterior to a private GitHub repo
 
 **Use `ulterior-repo.zip`.** That is the only file you need — it already

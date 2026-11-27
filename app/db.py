@@ -1,4 +1,5 @@
 from sqlalchemy import create_engine
+from sqlalchemy.schema import CreateColumn
 from sqlalchemy.orm import sessionmaker
 
 from .models import Base
@@ -50,7 +51,6 @@ def _add_missing_columns():
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
     preparer = engine.dialect.identifier_preparer
-    type_compiler = engine.dialect.type_compiler_instance
 
     with engine.begin() as conn:
         for table in Base.metadata.sorted_tables:
@@ -72,12 +72,14 @@ def _add_missing_columns():
                         f"deliberately -- startup will not invent a value for "
                         f"rows that already exist."
                     )
+                # CreateColumn renders the column exactly as CREATE TABLE
+                # would -- name, type, DEFAULT and NOT NULL -- from the model.
+                # Building it from the type alone dropped the DEFAULT and the
+                # NOT NULL, so a column declared NOT NULL with a default was
+                # added as a nullable column with no default.
+                ddl = str(CreateColumn(column).compile(dialect=engine.dialect)).strip()
                 conn.exec_driver_sql(
-                    "ALTER TABLE {} ADD COLUMN {} {}".format(
-                        preparer.format_table(table),
-                        preparer.format_column(column),
-                        type_compiler.process(column.type),
-                    )
+                    "ALTER TABLE {} ADD COLUMN {}".format(preparer.format_table(table), ddl)
                 )
 
 

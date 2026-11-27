@@ -25,10 +25,13 @@ class AuthorizationIn(BaseModel):
             raise ValueError("confirm that you have permission to audit this site")
         return v
 
-    @field_validator("owner_name", "organisation", "reference")
+    # mode="before": collapse whitespace BEFORE min_length is checked.
+    # Afterwards, "   " passed min_length=2 and was then stored as "",
+    # an empty permission record that the gate accepted.
+    @field_validator("owner_name", "organisation", "reference", mode="before")
     @classmethod
     def _plain_text(cls, v):
-        v = " ".join(str(v).split())
+        v = " ".join(str(v if v is not None else "").split())
         if any(ch in v for ch in "<>"):
             raise ValueError("plain text only")
         return v
@@ -53,7 +56,7 @@ class AuditJobCreate(BaseModel):
     # list let one request pin a worker for days and stall every other audit,
     # including the public demo. Twenty steps is far more than any real
     # checkout funnel has.
-    target_urls: Optional[List[str]] = Field(default=None, max_length=20)
+    target_urls: Optional[List[str]] = Field(default=None, min_length=1, max_length=20)
 
     # Opt in to the Layer 3 LLM pass. Offline language detection ALWAYS runs
     # regardless of this flag -- setting it only ADDS findings that the
@@ -110,6 +113,12 @@ class AuditJobOut(BaseModel):
     authorization: Optional[dict] = None
     # Fingerprints of the evidence (app/integrity.py); null until it finishes.
     evidence_manifest: Optional[dict] = None
+    # 2.4: per-pattern Observed / Not observed / Partially assessed / Not assessed.
+    coverage: Optional[List[dict]] = None
+    # 2.4: the person who checked the findings before the report went out.
+    review: Optional[dict] = None
+    # 2.4: how many times a worker has started this job (retries after a crash).
+    attempts: int = 0
     violations: List[ViolationOut] = []
 
     # model_config, not `class Config` -- the class-based form is the
@@ -135,8 +144,6 @@ class DemoAuditCreate(BaseModel):
 # most tightly bounded shape that does the job: a site name, a version, and
 # up to twenty findings of capped length. Anything else is a 422.
 
-from typing import Dict, Literal  # noqa: E402
-from pydantic import field_validator  # noqa: E402
 
 _SITE_RE = r"^[a-z0-9.-]{1,120}$"
 
@@ -206,3 +213,21 @@ class PriceDropsIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     days: int = Field(default=7, ge=2, le=30)
     limit: int = Field(default=15, ge=1, le=50)
+
+
+class ReviewIn(BaseModel):
+    """A person's sign-off that every finding was checked against its
+    screenshot before the report was sent."""
+    model_config = ConfigDict(extra="forbid")
+
+    reviewer: str = Field(min_length=2, max_length=120)
+    outcome: Literal["confirmed", "edited", "rejected_some"]
+    note: str = Field(default="", max_length=600)
+
+    @field_validator("reviewer", "note", mode="before")
+    @classmethod
+    def _plain(cls, v):
+        v = " ".join(str(v if v is not None else "").split())
+        if any(ch in v for ch in "<>"):
+            raise ValueError("plain text only")
+        return v

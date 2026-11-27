@@ -11,6 +11,7 @@ interface is written so that swap touches only this file.
 """
 
 import time
+import re
 import uuid
 from collections import defaultdict, deque
 from threading import Lock
@@ -104,7 +105,15 @@ def _client_ip(request) -> str:
     if config.TRUST_PROXY_HEADERS:
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
-            return forwarded.split(",")[0].strip()
+            # Proxies APPEND the address they saw, so the trustworthy entry is
+            # counted from the RIGHT: with one proxy in front (Railway, nginx)
+            # it is the last one. The leftmost entry is whatever the client
+            # chose to send, and taking it let anyone rotate a fake value per
+            # request and walk straight through every rate limit.
+            parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+            if parts:
+                hops = max(1, config.TRUSTED_PROXY_HOPS)
+                return parts[-hops] if len(parts) >= hops else parts[0]
     return request.client.host if request.client else "unknown"
 
 
@@ -156,6 +165,10 @@ _ROUTE_LIMITS = [
     ("POST", "/prices/", lambda: config.RATE_LIMIT_PRICES_PER_MINUTE, 60, "POST:prices-read"),
     ("POST", "/prices", lambda: config.RATE_LIMIT_PRICES_PER_MINUTE, 60, "POST:prices"),
     ("GET", "/demo-audit", lambda: config.RATE_LIMIT_POLL_PER_MINUTE, 60, "GET:poll"),
+    # Generating a PDF or hashing every screenshot is real work: these get
+    # their own, smaller budget instead of the 240/min polling allowance.
+    ("GET", "/audits/", lambda: config.RATE_LIMIT_HEAVY_PER_MINUTE, 60, "GET:heavy",
+     lambda path: path.endswith(("/report.pdf", "/verify-evidence"))),
     ("GET", "/audits", lambda: config.RATE_LIMIT_POLL_PER_MINUTE, 60, "GET:poll"),
     ("GET", "/demo/", lambda: config.RATE_LIMIT_STATIC_PER_MINUTE, 60, "GET:static"),
     # The landing page's stylesheet and script. Same reasoning as the demo's:
@@ -177,8 +190,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         limit = None
         window = 60
         bucket = None
-        for m, prefix, limit_fn, win, name in _ROUTE_LIMITS:
-            if method == m and path.startswith(prefix):
+        for rule in _ROUTE_LIMITS:
+            m, prefix, limit_fn, win, name = rule[:5]
+            only_if = rule[5] if len(rule) > 5 else None
+            if method == m and path.startswith(prefix) and (only_if is None or only_if(path)):
                 limit, window, bucket = limit_fn(), win, name
                 break
         if limit is None:
@@ -206,6 +221,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 # Correlation ID
 # ---------------------------------------------------------------------------
 
+_CID_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
 class CorrelationIdMiddleware(BaseHTTPMiddleware):
     """
     Assigns every request a correlation id, echoed in the response header and
@@ -213,7 +231,10 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
     the client reports the id, and an operator greps the server log for it.
     """
     async def dispatch(self, request, call_next):
-        cid = request.headers.get("x-correlation-id") or uuid.uuid4().hex[:16]
+        # Only a short, plain id is echoed. Anything else (newlines that forge
+        # log lines, a 10 kB header) is replaced with a fresh one.
+        supplied = request.headers.get("x-correlation-id") or ""
+        cid = supplied if _CID_RE.fullmatch(supplied) else uuid.uuid4().hex[:16]
         request.state.correlation_id = cid
         response = await call_next(request)
         response.headers["X-Correlation-ID"] = cid
@@ -316,7 +337,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 # origin can run here at all. 'unsafe-inline' still covers the
                 # page's own <script>/<style> blocks — narrow it to a nonce if
                 # the frontend ever grows past one file.
-                "script-src 'self' 'unsafe-inline'; "
+                # Our own pages (landing, demo, dashboard, privacy) carry no
+                # inline script, so they get script-src 'self' only. The two
+                # practice storefronts keep 'unsafe-inline': they are fixtures
+                # imitating real shops, and their fake countdown is inline.
+                + ("script-src 'self' 'unsafe-inline'; "
+                   if request.url.path.startswith(("/storefront/", "/storefront-clean/"))
+                   else "script-src 'self'; ")
+                + 
                 "style-src 'self' 'unsafe-inline'; "
                 "img-src 'self' data:; "
                 # connect-src stays 'self': the dashboard talks only to this

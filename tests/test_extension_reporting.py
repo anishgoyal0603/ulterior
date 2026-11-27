@@ -107,7 +107,13 @@ def test_reporting_is_off_until_switched_on_and_then_sends_only_what_it_showed(c
     assert len(_reports(api)) == before, "nothing may be sent before Send is pressed"
 
     popup.click("#report-send")
-    popup.wait_for_function("document.getElementById('report-status').textContent.includes('Sent')", timeout=8000)
+    # Polled from Python: the popup's own CSP (script-src 'self') forbids the
+    # eval that a string predicate in wait_for_function needs when it retries.
+    for _ in range(80):
+        if "Sent" in popup.inner_text("#report-status"):
+            break
+        popup.wait_for_timeout(100)
+    assert "Sent" in popup.inner_text("#report-status")
     after = _reports(api)
     assert len(after) == before + 1
     got = after[0]

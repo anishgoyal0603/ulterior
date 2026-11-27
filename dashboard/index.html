@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ulterior by The Odyssey — SIH26199</title>
-<link rel="stylesheet" href="dashboard.css?v=20261126">
+<link rel="stylesheet" href="dashboard.css?v=20261127">
 </head>
 <body>
 
@@ -142,6 +142,7 @@
       </label>
     </div>
     <p id="run-status" role="status" aria-live="polite"></p>
+    <button id="cancel-audit" type="button" hidden>Stop this audit</button>
   </section>
 
   <section class="kpis" aria-label="Totals">
@@ -202,6 +203,24 @@
         <button id="compare-run" type="button">Compare</button>
       </div>
       <p id="trust-result" class="disc-note" role="status" aria-live="polite"></p>
+      <!-- Per-pattern coverage: Observed / Not observed / Partially / Not assessed -->
+      <details id="trust-coverage" class="coverage" hidden>
+        <summary id="coverage-summary"></summary>
+        <ul id="coverage-list"></ul>
+      </details>
+      <!-- A person checks every finding against its screenshot before a report goes out. -->
+      <p id="trust-review" class="disc-line"></p>
+      <div class="trust-actions review-form" id="review-form">
+        <label class="trust-compare">Reviewed by
+          <input id="review-name" type="text" maxlength="120" autocomplete="off" aria-label="Reviewer name"></label>
+        <select id="review-outcome" aria-label="Review outcome">
+          <option value="confirmed">Every finding confirmed</option>
+          <option value="edited">Checked; some corrected</option>
+          <option value="rejected_some">Checked; some rejected</option>
+        </select>
+        <input id="review-note" type="text" maxlength="600" autocomplete="off" placeholder="Note (optional)" aria-label="Review note">
+        <button id="review-save" type="button">Record review</button>
+      </div>
     </div>
     <div class="table-scroll">
       <table class="vtable">
@@ -247,6 +266,6 @@
   </div>
 </footer>
 
-<script src="dashboard.js?v=20261126" defer></script>
+<script src="dashboard.js?v=20261127" defer></script>
 </body>
 </html>

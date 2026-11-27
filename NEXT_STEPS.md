@@ -1,3 +1,5 @@
+> **Historical note (September 2026).** This file records the project as it was then; its test counts and to-do items are out of date. For the current state see `RUNNING.md`, `README.md` and `docs/operations.md`.
+
 # Ulterior — status and next steps (2026-09-06)
 
 Supersedes the earlier version of this file and section 5 of

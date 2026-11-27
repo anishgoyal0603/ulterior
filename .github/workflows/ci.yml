@@ -42,7 +42,7 @@ jobs:
     # image tag is pinned to the same version the Dockerfile deploys with, so
     # CI cannot pass against a browser build production never runs.
     container:
-      image: mcr.microsoft.com/playwright/python:v1.47.0-jammy
+      image: mcr.microsoft.com/playwright/python:v1.65.0-jammy
 
     steps:
       - uses: actions/checkout@v4
@@ -74,6 +74,7 @@ jobs:
           API_KEYS: ci_read_key_that_is_definitely_long_enough_x,ci_admin_key_that_is_long_enough_y
           ADMIN_API_KEYS: ci_admin_key_that_is_long_enough_y
           CORS_ALLOW_ORIGINS: https://example.invalid
+          PUBLIC_BASE_URL: https://example.invalid
         run: python -c "from app import config; config.validate(); print('production config accepted')"
 
   extension-tests:

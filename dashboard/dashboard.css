@@ -422,3 +422,15 @@ tbody tr:hover td { background: var(--surface-2); }
 .trust-compare { display: inline-flex; align-items: center; gap: 6px; }
 .trust-compare input { width: 6em; font: inherit; padding: 5px 7px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: inherit; }
 .fp { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .85em; word-break: break-all; }
+
+/* ---- 2.4: stop button, coverage list, review ---- */
+#cancel-audit { margin-top: 6px; }
+.coverage { margin: 8px 0; }
+.coverage summary { cursor: pointer; font-weight: 600; }
+.coverage ul { margin: 6px 0 0; padding-left: 18px; }
+.coverage li { margin: 2px 0; }
+.cov-observed { font-weight: 600; }
+.cov-not_assessed, .cov-partially_assessed { opacity: .85; }
+.review-form input[type="text"] { font: inherit; padding: 5px 7px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: inherit; }
+.review-form select { font: inherit; padding: 5px 7px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: inherit; }
+#review-name { width: 12em; }

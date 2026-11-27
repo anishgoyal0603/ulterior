@@ -237,7 +237,7 @@ Stop the server first (**Ctrl+C**), then:
 Expect:
 
 ```
-311 passed, 90 deselected, 1 warning
+379 passed, 90 deselected, 1 warning
 ```
 
 ### Reading that line
@@ -246,7 +246,7 @@ Expect:
 that command doing exactly what you asked. `-m "not ui"` means *skip the tests
 marked `ui`* — the 90 browser tests that launch a real server and drive a real
 Chromium window. pytest is reporting how many it set aside on your
-instruction. Drop the flag and all 401 run.
+instruction. Drop the flag and all 469 run.
 
 **`1 warning` is also fine.** It comes from inside Starlette's own code, not
 this project. Ours are at zero and a test keeps them there.
@@ -478,6 +478,34 @@ auditing anyone's site from the server, get written permission:
    and the **PDF report** then includes that comparison.
 4. **Fix checklist.** Every PDF now ends with *Suggested fixes for developers*:
    for each pattern found, what to change and how to check it.
+
+### Workspaces, durable audits, coverage and review (2.4)
+
+- **Coverage of the 13 patterns.** Every finished audit shows, for each
+  pattern, *Observed*, *Not observed*, *Partially assessed* or *Not assessed*
+  (with the reason). It is in the dashboard and on the PDF.
+- **Human review.** After checking the findings against the screenshots,
+  fill **Reviewed by** and press **Record review**. The PDF prints it; an
+  unreviewed report says so on its first page.
+- **Stop this audit** cancels a queued or running audit.
+- **Audits survive a restart.** They are stored before they start; if the
+  server stops mid-audit they are restarted automatically.
+- **Customer workspaces.** Write keys as `org:key` in `API_KEYS`; each
+  organisation then sees only its own audits.
+
+Running a pilot for a customer: read `docs/operations.md` first.
+
+Also in 2.4, from the November code review: prices next to other numbers
+("₹499 20% off") are no longer glued together; JSON-LD from Shopify, Yoast
+and WooCommerce is read; hidden elements are ignored; faint and transparent
+text is scored correctly; deleting an audit removes all its screenshots;
+every crawling browser goes through a local egress proxy that blocks DNS
+rebinding; rate limits read the real client address behind a proxy; and the
+practice-store demo works without `ALLOW_LOCAL_TARGETS`.
+
+> **Playwright was updated to 1.65.** The first time you run
+> `run_demo.ps1` after pulling 2.4 it installs the new version and its
+> Chromium (about 150 MB). That is expected.
 
 ## 8. Making a change
 

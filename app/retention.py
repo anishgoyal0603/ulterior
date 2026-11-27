@@ -17,6 +17,7 @@ Two independent bounds, because either alone can be defeated:
 
 import logging
 import os
+import shutil
 from datetime import datetime, timedelta, timezone
 
 from .db import SessionLocal
@@ -26,7 +27,16 @@ from . import config
 logger = logging.getLogger(__name__)
 
 
-def _delete_evidence_files(job: AuditJob) -> None:
+def job_evidence_dir(job_id: int) -> str:
+    from capture.funnel_walker import DEFAULT_EVIDENCE_DIR
+    return os.path.join(DEFAULT_EVIDENCE_DIR, f"job_{int(job_id)}")
+
+
+def delete_job_evidence(job: AuditJob) -> None:
+    """Remove EVERY screenshot an audit took, not only the ones a finding
+    points at. The walker saves a full-page PNG for every step into the job's
+    own folder; deleting just the violations' files left clean steps, clean
+    audits and failed audits on disk forever."""
     for v in job.violations:
         if not v.screenshot_path:
             continue
@@ -35,6 +45,15 @@ def _delete_evidence_files(job: AuditJob) -> None:
                 os.remove(v.screenshot_path)
         except OSError:
             pass
+    shutil.rmtree(job_evidence_dir(job.id), ignore_errors=True)
+
+
+_delete_evidence_files = delete_job_evidence   # older name, kept for callers
+
+
+def _chunks(ids, size=500):
+    for i in range(0, len(ids), size):
+        yield ids[i:i + size]
 
 
 def purge_expired() -> int:
@@ -48,11 +67,18 @@ def purge_expired() -> int:
             cutoff = datetime.now(timezone.utc) - timedelta(days=config.RETENTION_DAYS)
             # created_at is stored naive-UTC by the model default; compare naive.
             cutoff_naive = cutoff.replace(tzinfo=None)
-            expired = db.query(AuditJob).filter(AuditJob.created_at < cutoff_naive).all()
+            expired = (db.query(AuditJob)
+                       .filter(AuditJob.created_at < cutoff_naive,
+                               AuditJob.status.notin_(("pending", "running")))
+                       .all())
             for job in expired:
-                _delete_evidence_files(job)
+                delete_job_evidence(job)
                 db.delete(job)   # cascade removes violations
                 removed += 1
+            # SessionLocal has autoflush off: without this the count below
+            # still sees the rows deleted above, double-counts them, and
+            # leaves the real overflow in place.
+            db.flush()
 
         # 2. Count-based cap: keep only the newest MAX_STORED_AUDITS
         if config.MAX_STORED_AUDITS > 0:
@@ -61,12 +87,13 @@ def purge_expired() -> int:
             if excess > 0:
                 oldest = (
                     db.query(AuditJob)
+                    .filter(AuditJob.status.notin_(("pending", "running")))
                     .order_by(AuditJob.created_at.asc())
                     .limit(excess)
                     .all()
                 )
                 for job in oldest:
-                    _delete_evidence_files(job)
+                    delete_job_evidence(job)
                     db.delete(job)
                     removed += 1
 
@@ -79,8 +106,11 @@ def purge_expired() -> int:
             extra = db.query(PriceObservation).count() - config.MAX_PRICE_OBSERVATIONS
             if extra > 0:
                 ids = [r.id for r in db.query(PriceObservation.id).order_by(PriceObservation.id.asc()).limit(extra)]
-                (db.query(PriceObservation).filter(PriceObservation.id.in_(ids))
-                 .delete(synchronize_session=False))
+                # In chunks: SQLite refuses an IN list longer than its
+                # variable limit (999 on older builds).
+                for chunk in _chunks(ids):
+                    (db.query(PriceObservation).filter(PriceObservation.id.in_(chunk))
+                     .delete(synchronize_session=False))
 
         # Extension reports: the same age limit, and their own count cap.
         # (Not counted in the return value, which is about audits.)
@@ -94,8 +124,9 @@ def purge_expired() -> int:
             if excess > 0:
                 ids = [r.id for r in db.query(ExtensionReport.id)
                        .order_by(ExtensionReport.created_at.asc()).limit(excess)]
-                (db.query(ExtensionReport).filter(ExtensionReport.id.in_(ids))
-                 .delete(synchronize_session=False))
+                for chunk in _chunks(ids):
+                    (db.query(ExtensionReport).filter(ExtensionReport.id.in_(chunk))
+                     .delete(synchronize_session=False))
 
         db.commit()
     except Exception:

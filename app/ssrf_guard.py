@@ -57,16 +57,54 @@ def _loopback_allowed() -> bool:
     return config.ALLOW_LOCAL_TARGETS and not config.IS_PRODUCTION
 
 
+# Ranges that are not "private" by Python's older rules but must never be
+# crawled. Listed explicitly so the answer does not depend on which Python
+# version the production image ships (Python's ipaddress rules changed in
+# 3.11-3.13).
+_EXTRA_BLOCKED = [ipaddress.ip_network(n) for n in (
+    "100.64.0.0/10",     # shared carrier-grade NAT space; some clouds and VPNs use it internally
+    "192.0.0.0/24",      # IETF protocol assignments
+    "198.18.0.0/15",     # benchmarking
+    "64:ff9b::/96",      # NAT64 well-known prefix (checked again via the embedded IPv4 below)
+    "64:ff9b:1::/48",    # local-use NAT64
+)]
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+
+
+def _embedded_ipv4(ip) -> "ipaddress.IPv4Address | None":
+    """The IPv4 address an IPv6 address carries inside it, if any.
+
+    ::ffff:169.254.169.254 (IPv4-mapped), 64:ff9b::a9fe:a9fe (NAT64),
+    2002:a9fe:a9fe:: (6to4) and Teredo all reach an IPv4 host. Checking only
+    the outer IPv6 address would let any of them walk around the IPv4 rules."""
+    if ip.version != 6:
+        return None
+    if ip.ipv4_mapped:
+        return ip.ipv4_mapped
+    if ip.sixtofour:
+        return ip.sixtofour
+    if ip.teredo:
+        return ip.teredo[1]
+    if ip in _NAT64:
+        return ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+    return None
+
+
 def _is_private_or_reserved(ip_str: str) -> bool:
     try:
-        ip = ipaddress.ip_address(ip_str)
+        ip = ipaddress.ip_address(ip_str.split("%", 1)[0])   # drop an IPv6 zone id
     except ValueError:
         return True  # unparseable -- fail closed, not open
     if ip.is_loopback and _loopback_allowed():
         return False
+    inner = _embedded_ipv4(ip)
+    if inner is not None and _is_private_or_reserved(str(inner)):
+        return True
     return (
         ip.is_private or ip.is_loopback or ip.is_link_local
         or ip.is_multicast or ip.is_reserved or ip.is_unspecified
+        or not ip.is_global
+        or any(ip in net for net in _EXTRA_BLOCKED if net.version == ip.version)
     )
 
 

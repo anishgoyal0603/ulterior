@@ -22,8 +22,11 @@ def _db():
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     limiter.reset()
+    # These tests are about the per-minute rate limit, not the per-workspace
+    # cap on simultaneous audits (tested in test_saas_foundations.py).
+    monkeypatch.setattr(config, "MAX_ACTIVE_AUDITS_PER_ORG", 1000)
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -185,6 +188,24 @@ def _valid_keys(monkeypatch):
     keys = ["k" * 32]
     monkeypatch.setattr(config, "API_KEYS", keys)
     monkeypatch.setattr(config, "ADMIN_API_KEYS", keys)
+    monkeypatch.setattr(config, "_raw_admin", keys[0])          # set explicitly, as production requires
+    monkeypatch.setattr(config, "PUBLIC_BASE_URL", "https://a.com")
+
+
+def test_production_requires_explicit_admin_keys_and_a_public_demo_url(monkeypatch):
+    _valid_keys(monkeypatch)
+    monkeypatch.setattr(config, "IS_PRODUCTION", True)
+    monkeypatch.setattr(config, "DATABASE_URL", "postgresql://u:p@h/d?sslmode=require")
+    monkeypatch.setattr(config, "CORS_ALLOW_ORIGINS", ["https://a.com"])
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@h/d?sslmode=require")
+    monkeypatch.setattr(config, "_raw_admin", "")
+    with pytest.raises(config.ConfigError, match="ADMIN_API_KEYS is not set"):
+        config.validate()
+    monkeypatch.setattr(config, "_raw_admin", "k" * 32)
+    monkeypatch.setattr(config, "PUBLIC_DEMO_ENABLED", True)
+    monkeypatch.setattr(config, "PUBLIC_BASE_URL", "http://127.0.0.1:8000")
+    with pytest.raises(config.ConfigError, match="PUBLIC_BASE_URL"):
+        config.validate()
 
 
 def test_production_rejects_sqlite(monkeypatch):

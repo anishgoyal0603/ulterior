@@ -12,6 +12,7 @@ setting has a working local default and nothing is required.
 """
 
 import os
+import re
 import sys
 
 
@@ -90,11 +91,58 @@ RETENTION_SWEEP_SECONDS = int(os.environ.get("RETENTION_SWEEP_SECONDS", "3600"))
 # API keys. Comma-separated. Production refuses to start without at least one.
 # ADMIN_API_KEYS is a subset authorised for destructive routes (delete/purge);
 # if unset it defaults to API_KEYS, but a real deployment should separate them.
-API_KEYS = [k.strip() for k in os.environ.get("API_KEYS", "").split(",") if k.strip()]
+#
+# ORGANISATIONS (2.4): an entry may be written "org:key", e.g.
+#   API_KEYS=team:KEY1,parkhya:KEY2
+# Each organisation sees only its own audits, reports and evidence. A plain
+# "key" belongs to the default organisation, DEFAULT_ORG ("team"), which also
+# owns every audit made before 2.4 and the public demo. Admin keys see all.
+DEFAULT_ORG = "team"
+_ORG_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+
+
+def _parse_keys(raw: str):
+    keys, orgs, bad = [], {}, []
+    for entry in (e.strip() for e in raw.split(",")):
+        if not entry:
+            continue
+        org, sep, key = entry.partition(":")
+        if not sep:
+            org, key = DEFAULT_ORG, entry
+        org, key = org.strip().lower(), key.strip()
+        if not key or not _ORG_NAME.match(org):
+            bad.append(org or "(empty)")
+            continue
+        keys.append(key)
+        orgs[key] = org
+    return keys, orgs, bad
+
+
+API_KEYS, KEY_ORGS, _BAD_KEY_ENTRIES = _parse_keys(os.environ.get("API_KEYS", ""))
 _raw_admin = os.environ.get("ADMIN_API_KEYS", "").strip()
+# Unset: the default team's keys are admin (the behaviour before 2.4), and an
+# organisation's own key never is -- otherwise every customer key could read
+# every other customer's audits.
 ADMIN_API_KEYS = (
-    [k.strip() for k in _raw_admin.split(",") if k.strip()] if _raw_admin else list(API_KEYS)
+    _parse_keys(_raw_admin)[0] if _raw_admin
+    else [k for k in API_KEYS if KEY_ORGS.get(k) == DEFAULT_ORG]
 )
+
+# Route every crawling browser through the local egress proxy, which checks
+# the address it actually connects to (defeats DNS rebinding). "off" only to
+# diagnose a site that will not load.
+EGRESS_PROXY = os.environ.get("EGRESS_PROXY", "on").strip().lower() not in ("0", "off", "false", "no")
+
+# Durable audit jobs (app/tasks.py).
+AUDIT_WORKERS = max(1, int(os.environ.get("AUDIT_WORKERS", "4")))
+# "false" = this process only accepts audits; run `python -m app.worker` separately.
+RUN_AUDIT_WORKERS = os.environ.get("RUN_AUDIT_WORKERS", "true").strip().lower() in ("1", "true", "yes")
+JOB_HEARTBEAT_SECONDS = max(2, int(os.environ.get("JOB_HEARTBEAT_SECONDS", "15")))
+JOB_STALE_SECONDS = max(10, int(os.environ.get("JOB_STALE_SECONDS", "180")))
+JOB_MAX_ATTEMPTS = max(1, int(os.environ.get("JOB_MAX_ATTEMPTS", "2")))
+JOB_SWEEP_SECONDS = max(2, int(os.environ.get("JOB_SWEEP_SECONDS", "30")))
+# Queued + running audits one organisation may have at once.
+MAX_ACTIVE_AUDITS_PER_ORG = max(1, int(os.environ.get("MAX_ACTIVE_AUDITS_PER_ORG", "3")))
 
 # Evidence retention. Audits older than this are purged by the retention job
 # (see app/retention.py). 0 disables automatic purging.
@@ -112,6 +160,8 @@ RATE_LIMIT_DEFAULT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_DEFAULT_PER_MINUT
 # These budgets are still bounded -- they cap memory and abuse -- but they are
 # sized for what the page genuinely does rather than for launching browsers.
 RATE_LIMIT_POLL_PER_MINUTE = int(os.environ.get("RATE_LIMIT_POLL_PER_MINUTE", "240"))
+# PDF reports and evidence verification: real CPU and disk work per call.
+RATE_LIMIT_HEAVY_PER_MINUTE = int(os.environ.get("RATE_LIMIT_HEAVY_PER_MINUTE", "30"))
 RATE_LIMIT_STATIC_PER_MINUTE = int(os.environ.get("RATE_LIMIT_STATIC_PER_MINUTE", "600"))
 # Reports sent from the browser extension: a person pressing Send, so a few a
 # minute is generous, and the endpoint needs no key, so it must stay small.
@@ -128,6 +178,9 @@ MAX_PRICE_OBSERVATIONS = int(os.environ.get("MAX_PRICE_OBSERVATIONS", "1000000")
 # collapses to a single shared bucket. Off by default because a client can
 # spoof the header when the app is directly internet-facing.
 TRUST_PROXY_HEADERS = os.environ.get("TRUST_PROXY_HEADERS", "false").strip().lower() in ("1", "true", "yes")
+# How many proxies sit in front of the app and append to X-Forwarded-For.
+# Railway, Render, Fly and a single nginx are each one hop.
+TRUSTED_PROXY_HOPS = max(1, int(os.environ.get("TRUSTED_PROXY_HOPS", "1")))
 
 
 def validate() -> None:
@@ -170,10 +223,34 @@ def validate() -> None:
                     f"{len(weak)} API key(s) are shorter than 24 characters and are "
                     "brute-forceable. Use secrets.token_urlsafe(32)."
                 )
+            if _BAD_KEY_ENTRIES:
+                problems.append(
+                    "API_KEYS has entries with an invalid organisation name "
+                    f"({', '.join(_BAD_KEY_ENTRIES)}). Use org:key with a lowercase "
+                    "name of letters, digits, '-' or '_'."
+                )
+            if not _raw_admin:
+                problems.append(
+                    "ADMIN_API_KEYS is not set. Set it explicitly to the key(s) allowed to "
+                    "delete audits and see every organisation -- never the dashboard's key."
+                )
             unknown_admin = [k for k in ADMIN_API_KEYS if k not in API_KEYS]
             if unknown_admin:
                 problems.append(
                     "ADMIN_API_KEYS contains key(s) not present in API_KEYS."
+                )
+
+        # 3b. The public demo walks the storefront at PUBLIC_BASE_URL. Left at
+        #     its default (127.0.0.1) on a deployed box, every demo audit
+        #     fails, because production never allows loopback crawling.
+        if PUBLIC_DEMO_ENABLED:
+            from urllib.parse import urlparse as _up
+            base = _up(PUBLIC_BASE_URL)
+            if base.scheme != "https" or (base.hostname or "") in ("127.0.0.1", "localhost", "0.0.0.0", "::1"):
+                problems.append(
+                    "PUBLIC_BASE_URL must be this deployment's public https address "
+                    "(e.g. https://your-app.up.railway.app) while PUBLIC_DEMO_ENABLED is on; "
+                    f"it is {PUBLIC_BASE_URL!r}."
                 )
 
         # 4. The loopback escape hatch is a local-development convenience and

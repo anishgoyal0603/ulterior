@@ -13,10 +13,9 @@ import time
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from playwright.sync_api import sync_playwright
 
 from .adapters.base import SiteAdapter
-from .navigation_guard import install_navigation_guard
+from .browser import launch_browser, new_guarded_page, playwright_session
 from .page_ready import wait_until_rendered
 from .state_extractor import (
     extract_page_state, PageState, MODAL_SELECTORS, modal_signature, _looks_like_dismiss,
@@ -33,7 +32,12 @@ from .state_extractor import (
 #
 # tempfile.gettempdir() gives the right answer on all three platforms
 # (%LOCALAPPDATA%\Temp, /tmp, or whatever TMPDIR says).
-DEFAULT_EVIDENCE_DIR = os.path.join(tempfile.gettempdir(), "dp_evidence")
+#
+# EVIDENCE_DIR overrides it. Set it in production to a PERSISTENT volume:
+# most hosts wipe the container's disk on every redeploy, which would delete
+# the screenshots a report's fingerprints vouch for.
+DEFAULT_EVIDENCE_DIR = (os.environ.get("EVIDENCE_DIR", "").strip()
+                        or os.path.join(tempfile.gettempdir(), "dp_evidence"))
 
 
 @dataclass
@@ -80,10 +84,11 @@ def walk_funnel(adapter: SiteAdapter, screenshot_dir: str = DEFAULT_EVIDENCE_DIR
         allow_file_urls = any((step.url or "").startswith("file://")
                               for step in adapter.funnel_steps)
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
-        page = browser.new_page(viewport={"width": 1280, "height": 900})
-        guard = install_navigation_guard(page, allow_file=allow_file_urls)
+    with playwright_session() as p:
+        browser = launch_browser(p, headless=headless)
+        page, guard = new_guarded_page(
+            browser, allow_file=allow_file_urls,
+            trusted_origins=[adapter.trusted_origin] if getattr(adapter, "trusted_origin", None) else None)
 
         for step in adapter.funnel_steps:
             if step.url:
@@ -138,9 +143,17 @@ def walk_funnel(adapter: SiteAdapter, screenshot_dir: str = DEFAULT_EVIDENCE_DIR
                 page.reload()
                 if step.wait_for_selector:
                     page.wait_for_selector(step.wait_for_selector, timeout=5000)
-                page.wait_for_timeout(300)
+                # The same wait as the first load: a fixed 300 ms captured an
+                # empty shell on hydrated storefronts, and the reload
+                # comparison then compared a page with nothing on it.
+                wait_until_rendered(page)
                 second_state = extract_page_state(page, step.name, adapter.price_selector_override)
                 trace.reload_pairs[step.name] = (state, second_state)
+                # A reload brings the pop-up back. Close it again so it does
+                # not cover the next step's controls. Not recorded as a
+                # dismissal: the reload was ours, not the shopper's.
+                if dismiss_interruptions:
+                    _dismiss_interruptions(page, second_state)
 
         if guard.blocked:
 

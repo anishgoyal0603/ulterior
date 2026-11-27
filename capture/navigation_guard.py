@@ -41,6 +41,7 @@ is as much an SSRF as a page from one.
 """
 
 from typing import Callable, List, Optional
+import re
 from urllib.parse import urlparse
 
 from app.ssrf_guard import validate_target_url, UnsafeURLError
@@ -58,9 +59,13 @@ class NavigationGuard:
     explicitly, so a production crawl can never read the server's disk.
     """
 
-    def __init__(self, allow_file: bool = False):
+    def __init__(self, allow_file: bool = False, trusted_origins=None):
         self.allow_file = allow_file
+        # Exact scheme://host:port origins configured by the server itself
+        # (see SiteAdapter.trusted_origin). Never derived from user input.
+        self.trusted_origins = {_origin(o) for o in (trusted_origins or []) if o}
         self.blocked: List[str] = []
+        self.websockets = "unguarded"   # becomes "routed" or "disabled" in install()
 
     def _is_allowed(self, url: str) -> bool:
         scheme = (urlparse(url).scheme or "").lower()
@@ -68,6 +73,8 @@ class NavigationGuard:
             return True
         if scheme == "file":
             return self.allow_file
+        if self.trusted_origins and _origin(url) in self.trusted_origins:
+            return True
         try:
             validate_target_url(url)
             return True
@@ -100,8 +107,56 @@ class NavigationGuard:
 
         page.route("**/*", handler)
 
+        # WebSockets never pass through page.route(), so they get their own
+        # gate with the same rules (Playwright 1.48+). On an older Playwright
+        # the page's WebSocket constructor is removed instead: an audit does
+        # not need live sockets, and an unchecked one is a way around the
+        # guard.
+        if hasattr(page, "route_web_socket"):
+            def ws_handler(ws):
+                url = ws.url
+                as_http = ("http" + url[2:]) if url.lower().startswith("ws") else url
+                if self._is_allowed(as_http):
+                    try:
+                        ws.connect_to_server()
+                    except Exception:
+                        pass
+                    return
+                host = urlparse(url).hostname or url
+                note = f"Blocked a WebSocket to '{host}' -- it resolves somewhere this crawler must not go."
+                if note not in self.blocked:
+                    self.blocked.append(note)
+                try:
+                    ws.close(code=1008, reason="blocked by audit policy")
+                except Exception:
+                    pass
 
-def install_navigation_guard(page, allow_file: bool = False) -> NavigationGuard:
-    guard = NavigationGuard(allow_file=allow_file)
+            page.route_web_socket(re.compile(r".*"), ws_handler)
+            self.websockets = "routed"
+        else:
+            page.add_init_script(_NO_WEBSOCKET_SCRIPT)
+            self.websockets = "disabled"
+
+
+_NO_WEBSOCKET_SCRIPT = """
+(() => {
+  const Blocked = function () { throw new Error("WebSockets are disabled during an audit"); };
+  try { Object.defineProperty(window, "WebSocket", { value: Blocked, configurable: false, writable: false }); }
+  catch (e) { window.WebSocket = Blocked; }
+})();
+"""
+
+
+def _origin(url: str) -> str:
+    u = urlparse(url)
+    scheme = (u.scheme or "").lower()
+    if scheme in ("ws", "wss"):
+        scheme = "http" if scheme == "ws" else "https"
+    port = u.port or (443 if scheme == "https" else 80)
+    return f"{scheme}://{(u.hostname or '').lower()}:{port}"
+
+
+def install_navigation_guard(page, allow_file: bool = False, trusted_origins=None) -> NavigationGuard:
+    guard = NavigationGuard(allow_file=allow_file, trusted_origins=trusted_origins)
     guard.install(page)
     return guard

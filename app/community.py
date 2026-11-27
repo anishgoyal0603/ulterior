@@ -12,6 +12,7 @@ proxy and access log between the browser and here.
 """
 import re
 import statistics
+import threading
 from collections import OrderedDict, defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List
@@ -55,15 +56,19 @@ class _SeenToday:
     def __init__(self, cap: int = 200_000):
         self.cap = cap
         self.items: "OrderedDict[tuple, None]" = OrderedDict()
+        # FastAPI runs sync endpoints on a thread pool: check-and-insert must
+        # be one step, or two requests can both be "first".
+        self._lock = threading.Lock()
 
     def first_time(self, sender: str, key: str, day: date) -> bool:
         k = (hash(sender), key, day)
-        if k in self.items:
-            return False
-        self.items[k] = None
-        if len(self.items) > self.cap:
-            self.items.popitem(last=False)
-        return True
+        with self._lock:
+            if k in self.items:
+                return False
+            self.items[k] = None
+            if len(self.items) > self.cap:
+                self.items.popitem(last=False)
+            return True
 
 
 seen_today = _SeenToday()

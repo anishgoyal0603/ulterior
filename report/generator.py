@@ -38,13 +38,16 @@ _AUTHORITY_TEXT = {
 
 
 def generate_audit_report(site_name: str, violations: list, output_path: str, *,
-                          job_id=None, authorization=None, manifest=None, comparison=None):
+                          job_id=None, authorization=None, manifest=None, comparison=None,
+                          coverage=None, review=None):
     """violations: list of dicts matching schemas.ViolationOut shape.
 
     Optional extras, each printed only when given:
       authorization -- the permission record stored with the audit
       manifest      -- SHA-256 evidence fingerprints (app/integrity.py)
       comparison    -- resolved / still present / new against an earlier audit
+      coverage      -- per-pattern Observed / Not observed / Partially / Not assessed
+      review        -- the person who checked the findings against the screenshots
     """
     _ensure_font()
     font_name = "DejaVuSans" if _FONT_REGISTERED else "Helvetica"
@@ -115,6 +118,21 @@ def generate_audit_report(site_name: str, violations: list, output_path: str, *,
         story.append(Paragraph(line, small))
         story.append(Spacer(1, 8))
 
+    # HUMAN REVIEW -- whether a person checked the findings before this went out.
+    if review:
+        outcome = {"confirmed": "confirmed every observation against its screenshot",
+                   "edited": "checked the observations and corrected some",
+                   "rejected_some": "checked the observations and rejected some"}.get(review.get("outcome"), "checked")
+        line = (f"<b>Human review.</b> {_esc(str(review.get('reviewer', '')))} {outcome} on "
+                f"{_esc(str(review.get('reviewed_at', '')))}.")
+        if review.get("note"):
+            line += f" Note: {_esc(str(review['note']))}"
+        story.append(Paragraph(line, small))
+    else:
+        story.append(Paragraph("<b>Human review.</b> Not yet reviewed by a person. Treat every "
+                               "observation as unconfirmed until it is.", small))
+    story.append(Spacer(1, 8))
+
     violations = sorted(violations, key=lambda v: v["confidence"], reverse=True)
 
     tier_counts = {"provable": 0, "corroborated": 0, "indicative": 0, "unstated": 0}
@@ -171,6 +189,32 @@ def generate_audit_report(site_name: str, violations: list, output_path: str, *,
         ("RIGHTPADDING", (0, 0), (-1, -1), 3),
     ]))
     story.append(table)
+
+    # COVERAGE -- what each of the 13 patterns could and could not be checked on,
+    # so silence is never read as a clean result.
+    if coverage:
+        from detectors.coverage import STATUS_LABEL
+        story.append(Spacer(1, 14))
+        story.append(CondPageBreak(160))
+        story.append(Paragraph("Coverage of the 13 patterns in this audit", small_bold))
+        story.append(Paragraph(
+            "\"Not observed\" means the pages the pattern needs were inspected and nothing was found. "
+            "\"Not assessed\" means those pages were not in this audit, so no conclusion is drawn.", small))
+        story.append(Spacer(1, 4))
+        rows = [[Paragraph(h, small_bold) for h in ["Pattern", "Status", "Why"]]]
+        for c in coverage:
+            rows.append([Paragraph(f"{_esc(str(c.get('code')))} {_esc(str(c.get('name')))}", small),
+                         Paragraph(STATUS_LABEL.get(c.get("status"), str(c.get("status"))), small_bold),
+                         Paragraph(_esc(str(c.get("note") or "")), small)])
+        cov = Table(rows, colWidths=[150, 90, 268], repeatRows=1)
+        cov.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a1a2e")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#cccccc")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        story.append(cov)
 
     # RE-CHECK — what changed since an earlier audit of the same pages.
     if comparison:

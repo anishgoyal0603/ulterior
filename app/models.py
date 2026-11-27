@@ -27,13 +27,35 @@ class AuditJob(Base):
     # fingerprint over all of it (app/integrity.py). Printed on the report.
     evidence_manifest_json = Column(Text, nullable=True)
 
+    # --- 2.4: ownership, durable jobs, coverage, review -------------------
+    # Which organisation owns this audit. NULL = the default team workspace
+    # (every audit made before 2.4, and the public demo).
+    org = Column(String(80), nullable=True, index=True)
+    # Everything needed to run (or re-run) the job, so a restart can resume it.
+    request_json = Column(Text, nullable=True)
+    attempts = Column(Integer, nullable=True)            # NULL = 0
+    heartbeat_at = Column(DateTime, nullable=True)       # updated while running
+    cancel_requested = Column(Integer, nullable=True)    # 1 = stop at the next safe point
+    # Optional client-chosen key: the same POST sent twice makes one audit.
+    idempotency_key = Column(String(80), nullable=True, index=True)
+    # Observed / not observed / partially assessed / not assessed, per pattern.
+    coverage_json = Column(Text, nullable=True)
+    # Who checked the findings against the screenshots before the report went out.
+    review_json = Column(Text, nullable=True)
+
     # cascade: deleting a job must delete its violations in the same
     # operation. Without this, bulk-deleting children separately and then
     # deleting the parent raises StaleDataError, because the session still
     # holds the loaded children and tries to null their foreign keys.
+    #
+    # No passive_deletes: with it the ORM skipped loading the children and
+    # left their removal to the database -- but the foreign key had no ON
+    # DELETE CASCADE, so PostgreSQL refused the delete and SQLite (foreign
+    # keys off) left orphan rows. The ORM now deletes the children itself,
+    # and the key also cascades for databases created from now on.
     violations = relationship(
         "ViolationRecord", back_populates="job",
-        cascade="all, delete-orphan", passive_deletes=True,
+        cascade="all, delete-orphan",
     )
 
 
@@ -41,7 +63,7 @@ class ViolationRecord(Base):
     __tablename__ = "violations"
 
     id = Column(Integer, primary_key=True, index=True)
-    job_id = Column(Integer, ForeignKey("audit_jobs.id"))
+    job_id = Column(Integer, ForeignKey("audit_jobs.id", ondelete="CASCADE"))
     pattern_code = Column(String(10), index=True)
     pattern_name = Column(String(100))
     step_name = Column(String(100))

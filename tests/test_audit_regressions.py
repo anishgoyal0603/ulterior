@@ -297,9 +297,11 @@ def test_the_navigation_guard_refuses_file_urls_unless_asked():
 
 def test_both_walkers_install_the_navigation_guard():
     """A guard that only one code path uses protects only one code path."""
-    for name in ("funnel_walker.py", "funnel_discovery.py"):
+    for name in ("funnel_walker.py", "funnel_discovery.py", "inspect_site.py"):
         src = (Path(__file__).parent.parent / "capture" / name).read_text()
-        assert "install_navigation_guard" in src, name
+        assert "new_guarded_page" in src, name
+    browser = (Path(__file__).parent.parent / "capture" / "browser.py").read_text()
+    assert "install_navigation_guard(page" in browser
 
 
 # --- Evidence isolation ----------------------------------------------------

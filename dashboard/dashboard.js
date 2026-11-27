@@ -184,9 +184,12 @@ async function loadAdapters() {
  * its re-enable and stayed disabled for the rest of the session. Ending a run
  * has to restore the page, not just the button that happened to start it.
  */
+let runningJobId = null;
 function endAuditRun() {
   clearInterval(pollTimer);
   pollTimer = null;
+  runningJobId = null;
+  document.getElementById("cancel-audit").hidden = true;
   ["run-audit", "run-urls"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.disabled = false;
@@ -245,6 +248,8 @@ async function startAudit(payload, btn) {
 
   const started = Date.now();
   let consecutiveFailures = 0;
+  runningJobId = job.id;
+  document.getElementById("cancel-audit").hidden = false;
 
   pollTimer = setInterval(async () => {
     const secs = Math.round((Date.now() - started) / 1000);
@@ -274,8 +279,9 @@ async function startAudit(payload, btn) {
       return;
     }
 
-    status.textContent = `Running\u2026 ${secs}s \u2014 a real browser is walking the site `
-      + "(usually 20\u201390 s).";
+    status.textContent = j.status === "pending"
+      ? `Queued\u2026 ${secs}s \u2014 waiting for a free browser.`
+      : `Running\u2026 ${secs}s \u2014 a real browser is walking the site (usually 20\u201390 s).`;
     status.classList.remove("is-error");
 
     // A run that never ends is a hang with a timer on it. The server's own
@@ -288,14 +294,16 @@ async function startAudit(payload, btn) {
       return;
     }
 
-    if (j.status === "done" || j.status === "failed") {
+    if (j.status === "done" || j.status === "failed" || j.status === "cancelled") {
       endAuditRun();
       // Name the failure. error_message carries the exception type and job id;
       // the server withholds the traceback on purpose (it can contain a DB
       // password) but the type is safe and usually identifies the cause.
       status.textContent = j.status === "done"
         ? `Done \u2713 (${secs}s)`
-        : (j.error_message || "Failed \u2717 \u2014 see the terminal running the server");
+        : j.status === "cancelled"
+          ? (j.error_message || "Cancelled.")
+          : (j.error_message || "Failed \u2717 \u2014 see the terminal running the server");
       status.classList.toggle("is-error", j.status !== "done");
       showJob(j);
       loadDashboard({keepSelection: true}).catch(showConnectionError);
@@ -434,6 +442,8 @@ function renderTrust(job, changed) {
   code.textContent = m ? m.fingerprint : "not available (audit made before fingerprints existed)";
   fp.append(b2, code);
   document.getElementById("verify-evidence").disabled = !m;
+  renderCoverage(job);
+  renderReview(job);
 }
 
 async function verifyEvidence() {
@@ -453,6 +463,79 @@ async function verifyEvidence() {
     out.textContent = msg;
   } catch (err) {
     out.textContent = "Could not verify: " + err.message;
+  }
+}
+
+/** Stop the audit that is running now. */
+async function cancelRunningAudit() {
+  if (!runningJobId) return;
+  const status = document.getElementById("run-status");
+  try {
+    const r = await authFetch(`/audits/${Number(runningJobId)}/cancel`, {method: "POST"});
+    status.textContent = r.status === "cancelled" ? "Cancelled." : "Stopping\u2026 the browser finishes its current page first.";
+  } catch (err) {
+    status.textContent = "Could not stop it: " + err.message;
+  }
+}
+
+const COVERAGE_LABEL = {
+  observed: "Observed", not_observed: "Not observed",
+  partially_assessed: "Partially assessed", not_assessed: "Not assessed",
+};
+
+/** What each of the 13 patterns could and could not be checked on. */
+function renderCoverage(job) {
+  const box = document.getElementById("trust-coverage");
+  const list = document.getElementById("coverage-list");
+  list.replaceChildren();
+  const cov = job.coverage || [];
+  box.hidden = !cov.length;
+  if (!cov.length) return;
+  const count = (st) => cov.filter(c => c.status === st).length;
+  document.getElementById("coverage-summary").textContent =
+    `Coverage of the 13 patterns: ${count("observed")} observed, ${count("not_observed")} not observed, `
+    + `${count("partially_assessed")} partially assessed, ${count("not_assessed")} not assessed`;
+  cov.forEach((c) => {
+    const li = document.createElement("li");
+    li.className = "cov-" + c.status;
+    li.textContent = `${c.code} ${c.name}: ${COVERAGE_LABEL[c.status] || c.status}` + (c.note ? ` \u2014 ${c.note}` : "");
+    list.append(li);
+  });
+}
+
+function renderReview(job) {
+  const p = document.getElementById("trust-review");
+  p.replaceChildren();
+  const b = document.createElement("strong");
+  b.textContent = "Human review: ";
+  const r = job.review;
+  p.append(b, document.createTextNode(r
+    ? `${r.reviewer}, ${r.reviewed_at} (${r.outcome.replace("_", " ")})` + (r.note ? ` \u2014 ${r.note}` : "")
+    : "not yet reviewed. Check every finding against its screenshot before sending the report."));
+}
+
+async function saveReview() {
+  if (!selectedJobId) return;
+  const out = document.getElementById("trust-result");
+  const reviewer = document.getElementById("review-name").value.trim();
+  if (reviewer.length < 2) {
+    out.textContent = "Type the name of the person who checked the findings.";
+    document.getElementById("review-name").focus();
+    return;
+  }
+  try {
+    const job = await authFetch(`/audits/${Number(selectedJobId)}/review`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        reviewer,
+        outcome: document.getElementById("review-outcome").value,
+        note: document.getElementById("review-note").value.trim(),
+      }),
+    });
+    renderReview(job);
+    out.textContent = "Review recorded. It is printed on the PDF report.";
+  } catch (err) {
+    out.textContent = "Could not record the review: " + err.message;
   }
 }
 
@@ -533,7 +616,7 @@ function showJob(job) {
   if (changedJob) baselineId = null;
   renderTrust(job, changedJob);
   document.getElementById("download-pdf").hidden = job.status !== "done";
-  if (job.status === "failed") {
+  if (job.status === "failed" || job.status === "cancelled") {
     const tbody = document.getElementById("violations-table");
     tbody.replaceChildren();
     const tr = document.createElement("tr");
@@ -885,6 +968,8 @@ document.getElementById("jobs-table").addEventListener("click", openJobFromRow);
 document.getElementById("download-pdf").addEventListener("click", downloadReport);
 document.getElementById("verify-evidence").addEventListener("click", verifyEvidence);
 document.getElementById("compare-run").addEventListener("click", compareWithBaseline);
+document.getElementById("cancel-audit").addEventListener("click", cancelRunningAudit);
+document.getElementById("review-save").addEventListener("click", saveReview);
 document.getElementById("jobs-table").addEventListener("keydown", (e) => {
   if (e.key === "Enter") openJobFromRow(e);
 });

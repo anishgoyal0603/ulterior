@@ -62,3 +62,8 @@ class SiteAdapter:
     site_name: str
     funnel_steps: List[FunnelStep] = field(default_factory=list)
     price_selector_override: Optional[str] = None
+    # Server-configured origin this adapter may load even though it is the
+    # server itself (the hosted practice storefronts). Only REGISTERED
+    # adapters set it; an audit built from pasted URLs never does, so this
+    # cannot be used to reach loopback or internal addresses.
+    trusted_origin: Optional[str] = None

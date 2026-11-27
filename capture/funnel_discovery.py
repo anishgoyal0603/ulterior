@@ -36,10 +36,9 @@ import time
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from playwright.sync_api import sync_playwright
 
 from .funnel_walker import FunnelTrace, _dismiss_interruptions, DEFAULT_EVIDENCE_DIR
-from .navigation_guard import install_navigation_guard
+from .browser import launch_browser, new_guarded_page, playwright_session
 from .page_ready import wait_until_rendered, looks_empty
 from .state_extractor import extract_page_state
 
@@ -56,6 +55,15 @@ NEVER_CLICK = [
     r"\bdonate\b", r"\bpre-?order\b", r"\bbid\b",
     r"\bdelete\b", r"\bremove\b", r"\bcancel my\b",
     r"\bsign (in|up)\b", r"\blog ?in\b", r"\bregister\b",   # never touch credentials
+]
+
+# Controls that open the cart itself. On most shops "Add to Cart" leaves you
+# on the product page (or opens a drawer); these are what then reach the
+# real cart page, where pre-ticked add-ons and fees appear.
+VIEW_CART_INTENTS = [
+    r"\bview (cart|bag|basket)\b", r"\bgo to (cart|bag|basket)\b",
+    r"\bmy (cart|bag|basket)\b", r"\bopen (cart|bag|basket)\b",
+    r"\bshopping (cart|bag|basket)\b", r"^\s*(cart|bag|basket)\s*(\(\d+\)|\d+)?\s*$",
 ]
 
 # Ordered stages. Each is a name plus the intents that move you INTO it.
@@ -76,10 +84,7 @@ STAGES = [
     ("cart", [
         r"\badd to (cart|bag|basket|trolley|tote)\b", r"\badd item\b",
         r"\badd to my (cart|bag|basket)\b", r"\badd\b(?=.*\bcart\b)",
-        r"\bview (cart|bag|basket)\b", r"\bgo to (cart|bag|basket)\b",
-        r"\bmy (cart|bag|basket)\b", r"\bopen (cart|bag|basket)\b",
-        r"\bshopping (cart|bag|basket)\b",
-    ]),
+    ] + VIEW_CART_INTENTS),
     ("checkout", [
         r"\b(proceed to )?check\s?out\b", r"\bcontinue to (checkout|payment|delivery|shipping)\b",
         r"\bgo to checkout\b", r"\bsecure checkout\b", r"\bcheckout now\b",
@@ -168,7 +173,7 @@ def _note_forbidden_controls(page, log: DiscoveryLog) -> int:
     return len(seen)
 
 
-def _find_control(page, intents: List[str], log: DiscoveryLog):
+def _find_control(page, intents: List[str], log: DiscoveryLog, refused: Optional[list] = None):
     """First visible link or button matching an intent AND not forbidden.
 
     Intents are tried in order, so `add to cart` beats a generic `continue`
@@ -195,14 +200,26 @@ def _find_control(page, intents: List[str], log: DiscoveryLog):
 
                 if _is_forbidden(text):
                     # Matched what we wanted AND something we must never press.
-                    # Skipped silently here on purpose: _note_forbidden_controls
-                    # already recorded every refusal on this page when it was
-                    # captured, so logging again would just duplicate it.
+                    # Not logged again here (_note_forbidden_controls already
+                    # named it), but remembered: only a refusal of the control
+                    # the NEXT step needed explains a walk that stopped.
+                    if refused is not None:
+                        refused.append(text)
                     continue
                 return element, text
             except Exception:
                 continue
     return None
+
+
+def _same_tab(element) -> None:
+    """Open a link in the current tab. target="_blank" would open a new tab
+    and discovery would go on reading the old one."""
+    try:
+        element.evaluate("el => { const f = el.closest('a,form') || el;"
+                         " if (f && f.target) f.target = '_self'; if (el.form && el.form.target) el.form.target = '_self'; }")
+    except Exception:
+        pass
 
 
 def walk_discovered_funnel(start_url: str, screenshot_dir: str = DEFAULT_EVIDENCE_DIR,
@@ -221,15 +238,13 @@ def walk_discovered_funnel(start_url: str, screenshot_dir: str = DEFAULT_EVIDENC
     refused_controls = 0
     trace = FunnelTrace(site_name=site_name or (start_url.split("/")[2] if "//" in start_url else start_url))
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
-        page = browser.new_page(viewport={"width": 1280, "height": 900})
+    with playwright_session() as p:
+        browser = launch_browser(p, headless=headless)
         # Discovery clicks links it found on the page, so the URLs it visits
         # were never seen by the pre-flight check. A page can offer
         # <a href="http://10.0.0.5:5432/">Proceed to checkout</a>, which
         # matches the checkout intent and is not on the never-click list.
-        guard = install_navigation_guard(
-            page, allow_file=start_url.startswith("file://"))
+        page, guard = new_guarded_page(browser, allow_file=start_url.startswith("file://"))
 
         def capture(step_name: str, reload_check: bool = False):
             state = extract_page_state(page, step_name)
@@ -257,8 +272,11 @@ def walk_discovered_funnel(start_url: str, screenshot_dir: str = DEFAULT_EVIDENC
                 try:
                     page.reload()
                     wait_until_rendered(page)
-                    trace.reload_pairs[step_name] = (
-                        state, extract_page_state(page, step_name))
+                    second = extract_page_state(page, step_name)
+                    trace.reload_pairs[step_name] = (state, second)
+                    # The reload re-opens any pop-up that was just closed, and
+                    # it would sit over the control the next step must click.
+                    _dismiss_interruptions(page, second)
                 except Exception:
                     pass
             return state
@@ -279,13 +297,16 @@ def walk_discovered_funnel(start_url: str, screenshot_dir: str = DEFAULT_EVIDENC
         capture("entry", reload_check=True)
         log.reached.append("entry")
 
+        refused_next = []     # forbidden controls that matched a step we needed
         for stage_name, intents in STAGES + [FINAL_STAGE]:
-            found = _find_control(page, intents, log)
+            found = _find_control(page, intents, log, refused_next)
             if not found:
                 log.skipped.append(stage_name)
                 continue
             element, label = found
+            url_before = page.url
             try:
+                _same_tab(element)
                 element.click(timeout=8000)
                 wait_until_rendered(page)
             except Exception as exc:
@@ -297,6 +318,19 @@ def walk_discovered_funnel(start_url: str, screenshot_dir: str = DEFAULT_EVIDENC
                 continue
 
             log.notes.append(f"Clicked '{label}' to reach {stage_name}.")
+            # "Add to Cart" usually leaves the shopper on the product page or
+            # opens a drawer. Go on to the cart page itself when the page
+            # offers one, so the cart is not skipped on the way to checkout.
+            if stage_name == "cart" and page.url == url_before:
+                more = _find_control(page, VIEW_CART_INTENTS, log)
+                if more:
+                    try:
+                        _same_tab(more[0])
+                        more[0].click(timeout=8000)
+                        wait_until_rendered(page)
+                        log.notes.append(f"Clicked '{more[1]}' to open the cart page.")
+                    except Exception:
+                        pass
             capture(stage_name, reload_check=(stage_name == "product"))
             log.reached.append(stage_name)
 
@@ -309,7 +343,7 @@ def walk_discovered_funnel(start_url: str, screenshot_dir: str = DEFAULT_EVIDENC
             )
 
         if len(trace.states) == 1:
-            if refused_controls:
+            if refused_next:
                 # Do not diagnose bot protection on a page that was obviously a
                 # real checkout -- the walk ended because it was supposed to.
                 #

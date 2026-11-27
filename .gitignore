@@ -38,3 +38,6 @@ dist/
 
 # ---- Screenshot runs (made by scripts/capture_screenshots.py) ----
 /screenshots/20*/
+
+# Output of scripts/audit_url.py --json (generated, not source)
+sandbox-results*.json

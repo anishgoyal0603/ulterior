@@ -1,0 +1,96 @@
+"""
+What each of the 13 patterns could actually be checked on, for one audit.
+
+A report that lists only findings invites the reader to treat silence as a
+clean result. Silence only means "not observed" when the pages a pattern
+needs were actually in the walk: drip pricing cannot be seen without a
+checkout total, basket sneaking without a cart. So every audit records, for
+every pattern, one of:
+
+  observed            at least one finding
+  not_observed        the pages it needs were inspected and nothing was found
+  partially_assessed  only part of the pattern can be checked by this tool
+                      (no finding, and the report says which part)
+  not_assessed        the pages it needs were not reached; the reason is given
+
+The page requirements are deliberately simple and visible here, so a reader
+can check them against the walk itself.
+"""
+from typing import Iterable, List
+
+from detectors.taxonomy import DARK_PATTERNS
+
+_SUBSCRIPTION_WORDS = ("subscri", "free trial", "trial", "auto-renew", "autorenew", "membership",
+                       "cancel", "renews")
+_BILLING_WORDS = ("per month", "/month", "/mo", "monthly", "per year", "/year", "annual", "billing",
+                  "plan", "seat", "renew")
+
+
+def _text(states) -> str:
+    return " ".join((getattr(s, "full_text", "") or "").lower() for s in states)
+
+
+def assess_coverage(trace, observed_codes: Iterable[str]) -> List[dict]:
+    states = list(getattr(trace, "states", []) or [])
+    observed = set(observed_codes or [])
+    n = len(states)
+    any_page = n > 0
+    priced = [s for s in states if getattr(s, "price", None) is not None]
+    totals = [s for s in states if getattr(s, "line_items", None)]
+    with_boxes = [s for s in states if getattr(s, "checkboxes", None)]
+    with_buttons = [s for s in states if len(getattr(s, "buttons", []) or []) >= 1]
+    with_pairs = len([s for s in states if len(getattr(s, "buttons", []) or []) >= 2]) > 0
+    reloads = bool(getattr(trace, "reload_pairs", None))
+    roles = set((getattr(trace, "step_roles", {}) or {}).values())
+    text = _text(states)
+
+    def need(cond, reason_if_not):
+        return (True, "") if cond else (False, reason_if_not)
+
+    rules = {
+        "DP-01": need(any_page and reloads,
+                      "No page was reloaded to test whether a timer or stock count is real."
+                      if any_page else "No page was captured."),
+        "DP-02": need(bool(with_boxes or totals), "No cart or checkout page (options or line items) was reached."),
+        "DP-03": need(bool(with_buttons), "No page with accept/decline choices was captured."),
+        "DP-04": need(any_page, "No page was captured."),
+        "DP-05": need("cancel" in roles or "signup" in roles or any(w in text for w in _SUBSCRIPTION_WORDS),
+                      "No subscription, trial or cancellation page was in scope."),
+        "DP-06": need(with_pairs, "No page offered two choices to compare."),
+        "DP-07": need(len(priced) >= 2, "Fewer than two priced pages, so an advertised price could not be "
+                                        "compared with a later one."),
+        "DP-08": need(bool(priced) and bool(totals) and n >= 2,
+                      "No first price followed by an itemised total (checkout) was captured."),
+        "DP-09": need(any_page, "No page was captured."),
+        "DP-10": need(n >= 2, "Only one page was captured, so a repeated prompt could not be seen."),
+        "DP-11": need(bool(with_boxes), "No page with checkboxes or consent options was captured."),
+        "DP-12": need(any(w in text for w in _BILLING_WORDS) or bool(with_boxes and "plan" in text),
+                      "No plan, renewal or billing page was in scope."),
+        "DP-13": need(any_page, "No page was captured."),
+    }
+    partial = {
+        "DP-09": "Checks only whether ad labels are readable, not whether an ad imitates ordinary content.",
+        "DP-13": "Checks how warnings and download prompts are presented; no file is downloaded or analysed.",
+    }
+
+    out = []
+    for p in DARK_PATTERNS:
+        assessed, reason = rules.get(p.code, (any_page, "No page was captured."))
+        if p.code in observed:
+            status, note = "observed", ""
+        elif not assessed:
+            status, note = "not_assessed", reason
+        elif p.code in partial:
+            status, note = "partially_assessed", partial[p.code]
+        else:
+            status, note = "not_observed", ""
+        out.append({"code": p.code, "name": p.name, "status": status, "note": note})
+    return out
+
+
+STATUS_LABEL = {
+    "observed": "Observed",
+    "not_observed": "Not observed",
+    "partially_assessed": "Partially assessed",
+    "not_assessed": "Not assessed",
+}

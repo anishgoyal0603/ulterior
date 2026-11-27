@@ -1,3 +1,5 @@
+> **Historical note (September 2026).** This file records the project as it was then; its test counts and to-do items are out of date. For the current state see `RUNNING.md`, `README.md` and `docs/operations.md`.
+
 # Ulterior — what's left, and what I need from you
 
 Written 8 Sep 2026, after the first CI run on GitHub.

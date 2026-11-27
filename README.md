@@ -341,11 +341,11 @@ throwaway test account with fake personal details, and run
 
 ### Retention
 
-There is currently **no automatic retention limit** — audits and
-screenshots persist until explicitly deleted. For a deployment, add a
-scheduled purge (a cron calling `DELETE /audits`, or a job that removes
-records older than N days). This is deliberately left as a documented gap
-rather than a half-implemented policy.
+Audits are purged automatically: anything older than `RETENTION_DAYS`
+(default 30) and anything beyond the newest `MAX_STORED_AUDITS` (default
+500) is deleted every hour, together with the audit's whole screenshot
+folder (`app/retention.py`). `DELETE /audits/{id}` removes one audit and all
+its screenshots immediately.
 
 ## Security
 
@@ -411,20 +411,24 @@ password, so no rotation is needed — but do not reuse that string as one.
   audited sites can contain session data — `.gitignore` excludes
   `*.har` and the evidence directories.
 
-### Not yet implemented (add before a public deployment)
+### What is in place (version 2.4)
 
-This is a hackathon prototype, and the audit surfaced these gaps honestly
-rather than papering over them:
+- **API keys, per organisation.** Every audit route needs a key; a key sees
+  only its own organisation's audits (`API_KEYS=org:key`). Admin keys are
+  separate and required in production.
+- **Rate limits** per client address (read from the right end of
+  `X-Forwarded-For` behind a proxy), with smaller budgets for audits,
+  deletes, PDF reports and evidence checks.
+- **SSRF protection in three places:** the URL is checked before an audit is
+  queued; every browser request, redirect and WebSocket is checked again; and
+  every connection goes through a local egress proxy that connects only to an
+  address it has just checked, which defeats DNS rebinding.
 
-- **No authentication on the API.** Anyone who can reach it can queue audit
-  jobs. Add an API key or OAuth layer before exposing it publicly.
-- **No rate limiting.** The crawler is a resource-intensive operation and
-  an unauthenticated `POST /audits` loop would be trivial to abuse.
-- **SSRF risk if you accept user-supplied URLs.** Adapters are currently
-  registered server-side, which is safe. If you ever let users submit
-  arbitrary URLs to audit, validate them against an allowlist and block
-  internal ranges (`localhost`, `169.254.169.254`, RFC1918) — otherwise the
-  crawler becomes a proxy into your own infrastructure.
+### Still to do before customers run audits themselves
+
+- Customer login (passwords, sessions) and a self-service dashboard.
+- Running the browser worker in its own network, verified on staging.
+- Blurring personal data inside screenshots (text is already redacted).
 
 ## Architecture
 
@@ -530,10 +534,13 @@ playwright install chromium
 # Run the test suite (real browser, real fixtures, ~12s)
 pytest tests/ -v
 
-# Start the API
+# Start the API. The practice storefront is served by the app itself at
+# PUBLIC_BASE_URL (default http://127.0.0.1:8000), and the demo adapters are
+# allowed to reach that one origin, so the demo works without
+# ALLOW_LOCAL_TARGETS. run_demo.ps1 / run_demo.sh do all of this for you.
 uvicorn app.main:app --reload
 
-# Open dashboard/index.html in a browser (calls http://localhost:8000)
+# Then open http://127.0.0.1:8000/dashboard/
 ```
 
 ### Enable real LLM-based Layer 3 (optional)

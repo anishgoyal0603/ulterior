@@ -15,15 +15,15 @@ need it.
 """
 
 import sys
-from playwright.sync_api import sync_playwright
 from .state_extractor import extract_page_state
+from .browser import launch_browser, new_guarded_page, playwright_session
 from app.privacy import redact
 
 
 def inspect(url: str, headless: bool = True):
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
-        page = browser.new_page(viewport={"width": 1280, "height": 900})
+    with playwright_session() as p:
+        browser = launch_browser(p, headless=headless)
+        page, _guard = new_guarded_page(browser)
         page.goto(url, timeout=20000)
         page.wait_for_timeout(500)
         state = extract_page_state(page, step_name="inspect")

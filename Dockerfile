@@ -1,7 +1,7 @@
 # Playwright's official image ships Chromium + all system deps pre-installed
 # -- this avoids the single most common Playwright deployment failure
 # (missing .so libraries for the headless browser).
-FROM mcr.microsoft.com/playwright/python:v1.47.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.65.0-jammy
 
 WORKDIR /app
 COPY requirements.txt requirements-prod.txt ./
@@ -12,6 +12,10 @@ RUN pip install --no-cache-dir -r requirements.txt -r requirements-prod.txt
 COPY . .
 
 EXPOSE 8000
+# Lets Docker / docker compose see when the app stops answering. (Railway
+# uses its own healthcheck setting; point it at /healthz.)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD python -c "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/healthz' % os.environ.get('PORT','8000'), timeout=4)" || exit 1
 # Shell form (not exec form) on purpose: PaaS hosts such as Railway, Render and
 # Fly inject the listen port as $PORT at runtime. A hardcoded --port 8000 makes
 # the container start fine and then fail every healthcheck, because the platform

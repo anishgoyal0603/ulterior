@@ -35,6 +35,10 @@ def _clean(path: str) -> str:
 
 HOSTED_DARK_DEMO = SiteAdapter(
     site_name="ShopMart (hosted demo storefront)",
+    # The storefront is served by this same app at PUBLIC_BASE_URL. Without
+    # this, the navigation guard refused 127.0.0.1 and every demo audit failed
+    # unless ALLOW_LOCAL_TARGETS was set (it is forbidden in production).
+    trusted_origin=config.PUBLIC_BASE_URL,
     funnel_steps=[
         # reload_for_urgency_check on the first two steps is what makes DP-01
         # provable rather than assumed: the page is loaded twice with real
@@ -50,6 +54,7 @@ HOSTED_DARK_DEMO = SiteAdapter(
 
 HOSTED_CLEAN_DEMO = SiteAdapter(
     site_name="HonestCart (hosted clean storefront)",
+    trusted_origin=config.PUBLIC_BASE_URL,
     funnel_steps=[
         FunnelStep("listing", _clean("listing.html")),
         FunnelStep("product", _clean("product.html")),
