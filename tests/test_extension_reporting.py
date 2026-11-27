@@ -30,6 +30,13 @@ KEY = "reports-test-key-1"
 DB = {}
 
 
+
+def _server_today():
+    """The day the SERVER files a price under (UTC, app/community.py), not the
+    laptop's local date -- in India they differ from midnight to 05:30."""
+    from app.community import today
+    return today()
+
 @pytest.fixture(scope="module")
 def api(tmp_path_factory):
     work = tmp_path_factory.mktemp("reports_api")
@@ -143,7 +150,7 @@ def _insert(key, price, days_ago, n=1):
     import sqlite3
     from datetime import date, timedelta
     con = sqlite3.connect(DB["path"])
-    d = (date.today() - timedelta(days=days_ago)).isoformat()
+    d = (_server_today() - timedelta(days=days_ago)).isoformat()
     for _ in range(n):
         con.execute("INSERT INTO price_observations (product_key, site, price, observed_on, created_at) "
                     "VALUES (?, ?, ?, ?, datetime('now'))", (key, key.split(":")[0], price, d))

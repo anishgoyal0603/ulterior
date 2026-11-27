@@ -26,6 +26,13 @@ from app.main import app
 from app.middleware import limiter
 
 
+
+def _server_today():
+    """The day the SERVER files a price under (UTC, app/community.py), not the
+    laptop's local date -- in India they differ from midnight to 05:30."""
+    from app.community import today
+    return today()
+
 @pytest.fixture(scope="module", autouse=True)
 def _db():
     init_db()
@@ -675,7 +682,7 @@ def test_community_prices_validate_dedup_and_use_medians(client, monkeypatch):
 
     with SessionLocal() as db:   # other people's reports today, one of them absurd
         for p in (15999, 16099, 1):
-            db.add(models.PriceObservation(product_key=key, site="flipkart.com", price=p, observed_on=date.today()))
+            db.add(models.PriceObservation(product_key=key, site="flipkart.com", price=p, observed_on=_server_today()))
         db.commit()
     daily = client.post("/prices/history", json={"key": key}).json()["daily"]
     assert daily[-1]["price"] == 15999 and daily[-1]["reports"] == 4, daily
@@ -694,7 +701,7 @@ def test_community_drops_need_real_reports_on_both_days(client):
         with SessionLocal() as db:
             for _ in range(n):
                 db.add(models.PriceObservation(product_key=key, site=key.split(":")[0], price=price,
-                                               observed_on=date.today() - timedelta(days=days_ago)))
+                                               observed_on=_server_today() - timedelta(days=days_ago)))
             db.commit()
     import uuid
     real, thin = f"myntra.com:{uuid.uuid4().hex[:8]}", f"myntra.com:{uuid.uuid4().hex[:8]}"
@@ -712,7 +719,7 @@ def test_old_community_prices_are_purged(client, monkeypatch):
     from app.retention import purge_expired
     with SessionLocal() as db:
         db.add(models.PriceObservation(product_key="ajio.com:old1", site="ajio.com", price=10,
-                                       observed_on=date.today() - timedelta(days=config.COMMUNITY_RETENTION_DAYS + 5)))
+                                       observed_on=_server_today() - timedelta(days=config.COMMUNITY_RETENTION_DAYS + 5)))
         db.commit()
     purge_expired()
     with SessionLocal() as db:
