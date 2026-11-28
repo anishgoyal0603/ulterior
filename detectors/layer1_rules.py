@@ -109,6 +109,12 @@ _NOT_A_TOTAL = re.compile(
 # A FEE row: a fee noun ("Delivery fee", "Platform charge", "Convenience
 # fee") or a row that is only a fee word ("Delivery", "GST"). Bare nouns
 # inside a product name ("Packing Cubes", "Service Kit") are not fees.
+_STANDALONE_AMOUNT = re.compile(
+    r"^\s*(?:[₹$€£]|rs\.?|inr)?\s*[\d,]+(?:\.\d{1,2})?\s*(?:/-)?\s*(?:\([^)]*\))?\s*$", re.IGNORECASE)
+# Payment-method headings and buttons that contain "to pay" / "pay".
+_PAY_HEADING = re.compile(r"\b(how|ways?|choose|select|proceed|continue|options?|method)\b[^\n]{0,20}\bto\s+pay\b"
+                          r"|\bproceed\s+to\b", re.IGNORECASE)
+
 _FEE_WORDS = re.compile(
     r"\b(fees?|charges?|surcharge|tax(es)?|gst|cess)\b"
     r"|^\s*(delivery|shipping|handling|convenience|platform|packaging|packing|cod|service|booking|processing)"
@@ -143,12 +149,15 @@ def _stated_total(state: "PageState") -> Optional[float]:
         if _NOT_A_TOTAL.search(line) or _PROMO_THRESHOLD_RE.search(line):
             continue
         amount = parse_money(line)
-        if (not amount and i + 1 < len(lines) and not _STATES_A_TOTAL.search(lines[i + 1])
-                and not _NOT_A_TOTAL.search(lines[i + 1]) and not _PROMO_THRESHOLD_RE.search(lines[i + 1])):
+        if _PAY_HEADING.search(line) and not amount:
+            continue          # "Choose how to pay": a heading, not a total
+        if not amount and i + 1 < len(lines) and _STANDALONE_AMOUNT.match(lines[i + 1]):
             # <div><span>Total</span><span>₹457</span></div> renders as two
-            # lines: the label on one, the amount on the next. Never a
-            # savings line ("Total" over "You saved ₹150").
-            amount = parse_money(re.sub(r"\([^)]*\)", " ", lines[i + 1]))
+            # lines: the label on one, the amount on the next. The next line
+            # must be ONLY an amount: "Choose how to pay" over "Wallet balance
+            # ₹50" is a heading over another row, and reading it replaced the
+            # real ₹457 total.
+            amount = parse_money(lines[i + 1])
         if not amount:
             continue
         rank = 1 if is_sub else (3 if _PAYABLE.search(line) else 2)
@@ -204,7 +213,20 @@ def _named_as_a_charge(name: str, text: str) -> bool:
     lowered = text.lower()
     for m in re.finditer(rf"(?<![a-z0-9]){re.escape(name)}(?![a-z0-9])", lowered):
         before = lowered[max(0, m.start() - 25):m.start()]
+        after = lowered[m.end():m.end() + 30]
         if re.search(r"\b(free|no|zero|waived)\b[^.\n]*$", before):
+            continue
+        # Mentions of the word that are not a charge: a payment method ("Cash
+        # on Delivery"), a speed or date ("Express delivery", "Delivery by
+        # Tue"), or a charge stated as nothing ("Delivery: FREE", "Delivery
+        # ₹0", "Delivery included"). Counting those as "named up front"
+        # silenced DP-08 when checkout then added "Delivery ₹49".
+        if re.search(r"\b(cash\s+on|pay\s+on|estimated|standard|express|fast|same[\s-]?day|next[\s-]?day)\s+$", before):
+            continue
+        if re.match(r"\s+(by|in|on|within|date|time|address|available|options?|details|status|tracking)\b", after):
+            continue
+        if re.match(r"(\s+(fees?|charges?))?\s*[:\-–]?\s*(free|nil|waived|included|inclusive|"
+                    r"(?:[₹$€£]|rs\.?|inr)\s*0(?![\d.,]))", after):
             continue
         return True
     return False
@@ -363,6 +385,13 @@ def detect_basket_sneaking_and_prechecked(trace: FunnelTrace) -> List[Violation]
                     continue
                 label = (cb.label_text or "").replace("\u2019", "'")
                 amount = parse_money(label)
+                # Free or ₹0: a complimentary extra adds nothing to the bill
+                # ("Free Gift Wrap (₹0)", "Complimentary 1-year Warranty").
+                positive = [a for a in re.findall(r"(?:[₹$€£]|\brs\.?|\binr\b)\s*([\d,]+(?:\.\d+)?)", label, re.IGNORECASE)
+                            if float(a.replace(",", "") or 0) > 0]
+                if not positive and (amount == 0 or re.search(r"\b(free|complimentary|included|no\s+charge)\b",
+                                                                label, re.IGNORECASE)):
+                    continue
                 # A credit: the minus TOUCHES the currency ("-₹50"), or opens
                 # the text / a bracket ("- ₹50", "(- ₹50)"). A dash used as
                 # punctuation ("Carry Bag - ₹15") is not a minus.
@@ -522,7 +551,13 @@ def detect_fake_urgency(trace: FunnelTrace) -> List[Violation]:
 # A countdown reads as a clock; a scarcity claim reads as a bare count. They
 # are DIFFERENT strengths of evidence and DP-01 now treats them differently,
 # so they are extracted separately.
-_CLOCK_RE = re.compile(r"\b\d{1,3}\s*:\s*\d{2}(?:\s*:\s*\d{2})?\b")
+# Up to four parts (DD:HH:MM:SS), never part of a longer clock: the old
+# pattern cut "02:14:33:12" to "02:14:33", which an honest multi-day timer
+# shows on both loads 2 s apart, so it was reported as frozen.
+_CLOCK_RE = re.compile(r"(?<![:\d])\d{1,3}\s*:\s*\d{2}(?:\s*:\s*\d{2}){0,2}(?![:\d])")
+# "10:00 - 18:00" is opening hours, not a countdown.
+_TIME_RANGE_AFTER = re.compile(r"^\s*(?:[-–—]|to)\s*\d{1,2}\s*:\s*\d{2}", re.IGNORECASE)
+_TIME_RANGE_BEFORE = re.compile(r"\d{1,2}\s*:\s*\d{2}\s*(?:[-–—]|to)\s*$", re.IGNORECASE)
 # "04h 22m 18s", "4 hrs 22 mins", "08m 12s" -- how Flipkart, Myntra and
 # Amazon write their timers.
 _UNIT_CLOCK_RE = re.compile(
@@ -556,6 +591,8 @@ def _find_clock(span: str) -> str:
     for start, end, value in sorted(found):
         if _WALL_CLOCK_AFTER.search(span[end:end + 12]) or _WALL_CLOCK_BEFORE.search(span[:start]):
             continue
+        if _TIME_RANGE_AFTER.search(span[end:end + 12]) or _TIME_RANGE_BEFORE.search(span[:start]):
+            continue
         if _DAY_WORD_AFTER.search(span[end:end + 12]) and not _IN_BEFORE.search(span[:start]):
             continue
         return value
@@ -573,8 +610,14 @@ def _straight_quotes(text: str) -> str:
 def _clock_to_seconds(value: str):
     """'00:04:59' -> 299. Returns None if it is not a clock."""
     parts = (value or "").strip().split(":")
-    if not 2 <= len(parts) <= 3:
+    if not 2 <= len(parts) <= 4:
         return None
+    if len(parts) == 4:                       # DD:HH:MM:SS
+        try:
+            d, h, m, sec = (int(x) for x in parts)
+        except ValueError:
+            return None
+        return d * 86400 + h * 3600 + m * 60 + sec
     try:
         numbers = [int(x) for x in parts]
     except ValueError:

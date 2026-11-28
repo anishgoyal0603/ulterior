@@ -146,7 +146,8 @@
         if (offers) {
           const list = Array.isArray(offers) ? offers : [offers];
           for (const o of list) {
-            const p = parseFloat(o && (o.price || o.lowPrice));
+            // "1,299.00" is 1299, not 1: parseFloat stops at the comma.
+            const p = parseFloat(String(o && (o.price || o.lowPrice) || "").replace(/,/g, ""));
             if (isFinite(p) && p > 0) return p;
           }
         }
@@ -221,7 +222,9 @@
       const t = textOf(row);
       if (t.length > 200) break;
       const free = /\b(free|waived)\b/i.test(t.replace(THRESHOLD_CLAUSE_RE, " "));
-      const nodes = amountNodes(row, 20).filter((a) => !a.struck && !labelEl.contains(a.el));
+      // A value cell can hold a condition too: "FREE (on orders above ₹499)".
+      const nodes = amountNodes(row, 20).filter((a) => !a.struck && !labelEl.contains(a.el)
+        && C.parseAmounts(String(a.text || "").replace(THRESHOLD_CLAUSE_RE, " ")).length > 0);
       if (nodes.length) {
         if (free && nodes.every((a) => a.value <= 0)) return 0;
         return nodes[nodes.length - 1].value;
@@ -439,6 +442,10 @@
         });
         return;
       }
+      // A free or ₹0 extra adds nothing to the bill ("Free Gift Wrap (₹0)",
+      // "Complimentary 1-year Warranty"), as on the server.
+      if (!amounts.length && (C.parseAmounts(label).some((a) => a.value === 0)
+                              || /\b(free|complimentary|included|no\s+charge)\b/i.test(label))) return;
       if (!(C.PAID_ADDON_RE.test(label) || amounts.length)) return;
       const ev = { add_on: C.clip(C.redact(label), 110), state: "selected when the page loaded, before you touched it" };
       if (amounts.length) ev.price = C.formatINR(amounts[0].value);
@@ -501,6 +508,25 @@
   }
 
   // ------------------------------------------- interface interference
+  /** CSS opacity on the element and every ancestor multiplies. Text faded
+   *  with opacity: .2 (Tailwind "opacity-20") keeps color rgb(0,0,0), and
+   *  was scored at 21:1 although it is barely visible. */
+  function effectiveOpacity(el) {
+    let o = 1;
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+      const v = parseFloat(getComputedStyle(n).opacity);
+      if (isFinite(v)) o *= v;
+    }
+    return Math.max(0, Math.min(1, o));
+  }
+
+  /** Contrast of el's text against what is behind it, as it is SEEN. */
+  function seenContrast(el, fg) {
+    const bg = effectiveBackground(el);
+    const faded = { r: fg.r, g: fg.g, b: fg.b, a: (fg.a === undefined ? 1 : fg.a) * effectiveOpacity(el) };
+    return C.contrastRatio(C.over(faded, bg), bg);
+  }
+
   function effectiveBackground(el) {
     const layers = [];
     for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
@@ -556,8 +582,7 @@
       const cs = getComputedStyle(decline);
       const fg = C.parseColor(cs.color);
       if (!fg) continue;
-      const bg = effectiveBackground(decline);
-      const ratio = C.contrastRatio(C.over(fg, bg), bg);
+      const ratio = seenContrast(decline, fg);
       const dr = decline.getBoundingClientRect(), ar = accept.getBoundingClientRect();
       const areaRatio = (ar.width * ar.height) / Math.max(1, dr.width * dr.height);
       const lowContrast = ratio < 3.0;
@@ -659,6 +684,26 @@
   /** The cart or checkout line that names the product you picked: the
    *  element whose words match most of the picked product's fingerprint, and
    *  the amount on its row. */
+  /** The quantity on this cart row: in the label's own words, or anywhere
+   *  in its row -- a sibling "Qty: 2", a number box, a quantity dropdown. A
+   *  row total of ₹998 for two ₹499 items is not a price change. */
+  const QTY_TEXT_RE = /\b(?:qty|quantity)\s*[:.]?\s*(\d{1,2})\b|\bx\s*(\d{1,2})\b|\b(\d{1,2})\s*x\b/i;
+  function rowQuantity(el) {
+    let row = el;
+    for (let i = 0; row && i < 4; i++, row = row.parentElement) {
+      if (i > 0 && fast(row).length > 300) break;
+      const qm = fast(row).match(QTY_TEXT_RE);
+      if (qm) return +(qm[1] || qm[2] || qm[3]);
+      const box = row.querySelector && row.querySelector(
+        'input[type=number], input[name*="qty" i], input[name*="quantity" i], select[name*="qty" i], select[name*="quantity" i], select[aria-label*="qty" i], select[aria-label*="quantity" i]');
+      if (box) {
+        const n = parseInt(box.value, 10);
+        if (n > 0 && n < 100) return n;
+      }
+    }
+    return 1;
+  }
+
   function lineItemFor(fp) {
     let best = null;
     for (const el of document.querySelectorAll(LABEL_TAGS + ", a")) {
@@ -673,8 +718,7 @@
       if (!isVisible(el)) continue;
       const v = amountForLabel(el);
       if (v === null || v <= 0) continue;
-      const qm = f.match(/\b(?:qty|quantity)\s*[:.]?\s*(\d{1,2})\b|\bx\s*(\d{1,2})\b|\b(\d{1,2})\s*x\b/i);
-      best = { text: textOf(el), value: v, qty: qm ? +(qm[1] || qm[2] || qm[3]) : 1, score: coverage, len: f.length };
+      best = { text: textOf(el), value: v, qty: rowQuantity(el), score: coverage, len: f.length };
     }
     return best;
   }
@@ -757,23 +801,33 @@
   // ------------------------------------------------ DP-05 Subscription Trap
   function subscriptionFindings() {
     const findings = [];
-    let cta = null;
+    // Every sign-up button is considered, not just the first: a footer
+    // "Subscribe" (newsletter) or a loyalty "Join now" must not stand in for
+    // the plan's own button, nor make an ordinary product page with an EMI
+    // option look like a subscription.
+    const NEWSLETTER_RE = /\b(newsletter|mailing\s+list|email\s+updates?|updates|alerts|notify\s+me)\b/i;
+    const withoutEmi = (t) => t.replace(/[^.\n]*\b(emi|emis|instal+ments?|pay\s*later|no[\s-]cost)\b[^.\n]*/gi, " ");
+    let cta = null, box = null;
     for (const el of document.querySelectorAll(CLICKABLE)) {
       const f = fast(el);
       if (!f || f.length > 40 || !C.SUBSCRIBE_CTA_RE.test(f) || !isVisible(el)) continue;
+      // The offer around the button: climb until there is enough text to
+      // hold a price and its terms, but stop BEFORE <body> -- the whole page
+      // is not this button's offer.
+      let b = el.parentElement || el;
+      for (let i = 0; i < 4 && fast(b).length < 300 && b.parentElement && b.parentElement !== document.body
+           && b.parentElement !== document.documentElement; i++) {
+        b = b.parentElement;
+      }
+      const offer = withoutEmi(fast(b).slice(0, 1200));
+      const recurring = C.RECURRING_BILLING_PATTERNS.some((p) => p.test(offer)) && C.parseAmounts(offer).length > 0;
+      if (!recurring) continue;
+      if (NEWSLETTER_RE.test(fast(b)) && !/(₹|rs\.?|inr)\s*[\d,]+[^.\n]{0,12}(\/|per\s+|a\s+)(mo|month|yr|year|week)/i.test(offer)) continue;
       cta = el;
+      box = b;
       break;
     }
     if (!cta) return findings;
-    // The offer around the button: climb until there is enough text to hold a
-    // price and its terms, but never past <body>.
-    let box = cta.parentElement || cta;
-    for (let i = 0; i < 4 && fast(box).length < 300 && box.parentElement && box.parentElement !== document.documentElement; i++) {
-      box = box.parentElement;
-    }
-    const offer = fast(box).slice(0, 1200);
-    const recurring = C.RECURRING_BILLING_PATTERNS.some((p) => p.test(offer));
-    if (!recurring || !C.parseAmounts(offer).length) return findings;
     const body = fast(document.body).slice(0, 40000);
 
     // Fine print: the trial-to-paid sentence drawn small or faint.
@@ -784,8 +838,7 @@
       const cs = getComputedStyle(el);
       const size = parseFloat(cs.fontSize) || 16;
       const fg = C.parseColor(cs.color);
-      const bg = effectiveBackground(el);
-      const ratio = fg ? C.contrastRatio(C.over(fg, bg), bg) : 21;
+      const ratio = fg ? seenContrast(el, fg) : 21;
       if (size >= 11 && ratio >= 3) continue;
       findings.push({
         code: "DP-05", tier: "corroborated",
@@ -825,8 +878,7 @@
       const cs = getComputedStyle(el);
       const size = parseFloat(cs.fontSize) || 16;
       const fg = C.parseColor(cs.color);
-      const bg = effectiveBackground(el);
-      const ratio = fg ? C.contrastRatio(C.over(fg, bg), bg) : 21;
+      const ratio = fg ? seenContrast(el, fg) : 21;
       if (ratio < 3 || size < 9 || (ratio < 4.5 && size < 11)) hard.push({ el, size, ratio });
     }
     if (hard.length) {

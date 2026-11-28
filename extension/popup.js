@@ -168,7 +168,9 @@
     // changed, the preview shows the new version (what is sent is always
     // what is shown).
     if (!$("report-preview").hidden) {
-      if (!results) {
+      if (!results || !(results.findings || []).length) {
+        // Nothing left to report: the server refuses an empty report, so
+        // the preview (and its Send button) goes away.
         $("report-preview").hidden = true;
       } else {
         const next = JSON.stringify(C.buildReportPayload(results), null, 2);
@@ -324,7 +326,7 @@
   });
   $("report-cancel").addEventListener("click", () => { $("report-preview").hidden = true; });
   $("report-send").addEventListener("click", async () => {
-    if (!current || !settings.report) return;
+    if (!current || !settings.report || !(current.findings || []).length) return;
     const btn = $("report-send");
     btn.disabled = true;
     try {

@@ -53,8 +53,10 @@
     if (value === null || value === undefined || !isFinite(value)) return "";
     const neg = value < 0;
     const abs = Math.abs(value);
-    const whole = Math.floor(abs);
-    const paise = Math.round((abs - whole) * 100);
+    // Rupees and paise from ONE rounding: 99.999 is ₹100, not "₹99.100".
+    const cents = Math.round(abs * 100);
+    const whole = Math.floor(cents / 100);
+    const paise = cents % 100;
     const s = String(whole);
     // Indian grouping: last three digits, then pairs.
     let grouped = s;
@@ -223,8 +225,14 @@
   // ------------------------------------------------- DP-04 Forced Action
   // A box you must tick to proceed, worded so that ticking it ALSO signs you
   // up for marketing or data sharing.
-  const CONSENT_TERMS_RE = /\b(i\s+agree|agree\s+to|accept|terms(\s+(of\s+(use|service)|and\s+conditions))?|t\s*&\s*c|privacy\s+policy)\b|शर्तों|नियम\s*(व|और)\s*शर्तें|सहमत/i;
-  const CONSENT_MARKETING_RE = /\b(marketing|promotional|promotions|offers|newsletters?|whats\s*app|sms|emails?\s+(about|on)|third[\s-]part(y|ies)|partners?|affiliates?|share\s+my\s+(data|details|information)|personali[sz]ed\s+ads)\b|प्रचार|ऑफ़र|ऑफर|विज्ञापन/i;
+  // The TERMS themselves must be named: "I agree to receive offers" on its
+  // own is an optional marketing box, not a bundle with the terms.
+  const CONSENT_TERMS_RE = /\b(terms(\s+(of\s+(use|service)|and\s+conditions|&\s*conditions))?|t\s*&\s*c'?s?|conditions\s+of\s+(use|sale)|privacy\s+policy|user\s+agreement)\b|शर्तों|नियम\s*(व|और)\s*शर्तें/i;
+  // Kept in step with MARKETING_CONSENT_TERMS in detectors/layer1_flow.py:
+  // selling TO the shopper, or their data to advertisers. Not the lawful
+  // notice ("how my data is shared with third parties"), not "delivery
+  // partners to fulfil this order", not "order updates via SMS".
+  const CONSENT_MARKETING_RE = /\b(marketing|promotional|promotions?|newsletters?|personali[sz]ed\s+ads|targeted\s+ads|advertis(ing|ers?)|affiliates?|offers?\s+(and|&)\s+updates|(offers?|deals?)\b[^.]{0,40}\b(whats\s*app|sms|emails?)|(whats\s*app|sms|emails?)\b[^.]{0,40}\b(offers?|deals?|promotions?)|receive\s+(exclusive\s+|special\s+)?(offers?|deals?)|share\s+(my|your)\s+(data|details|information)\b[^.]{0,60}\b(advertis\w*|affiliates?|marketing\s+partners?))\b|प्रचार|ऑफ़र|ऑफर|विज्ञापन/i;
   // A screen that will not let you continue on the web.
   const APP_WALL_RE = /\b(download|install|get|open)\s+(the\s+|our\s+)?app\b|ऐप\s*(डाउनलोड|इंस्टॉल)/i;
   const APP_WALL_BLOCK_RE = /\b(to\s+(continue|proceed|view|see|unlock|access|book|order)|continue\s+(in|on)\s+(the\s+)?app|only\s+(on|in)\s+(the\s+)?app|available\s+only\s+on\s+(the\s+)?app)\b/i;
@@ -246,7 +254,7 @@
   const EXECUTABLE_RE = /\.(exe|apk|msi|dmg|bat|scr|cmd|vbs|jar|pkg)(\?|#|$)/i;
 
   // ---------------------------------------------------- DP-10 Nagging
-  const DIALOG_HINT_RE = /\b(sign\s*in|log\s*in|login|download|install|app|notification|subscribe|offer|discount|% off|coupon|rate|review|location|newsletter|update)\b|लॉगिन|ऐप|ऑफ़र/i;
+  const DIALOG_HINT_RE = /\b(sign\s*in|sign\s*up|log\s*in|login|register|download|install|app|notifications?|subscribe|offers?|discount|coupon|rate|review|location|newsletter|updates?|membership|premium|upgrade|whats\s*app)\b|%\s*off\b|लॉगिन|ऐप|ऑफ़र/i;
 
   // ------------------------------------------------------------- privacy
   const PII_PATTERNS = [
@@ -397,8 +405,14 @@
    *  and a duration is not a countdown. */
   function parseCountdown(text) {
     const t = String(text || "");
-    let m = t.match(/\b(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\b/);
-    if (m) return (+(m[1] || 0)) * 3600 + (+m[2]) * 60 + (+m[3]);
+    // Up to DD:HH:MM:SS, never part of a longer clock (the old pattern read
+    // "02:14:33:12" as 02:14:33 and an honest multi-day timer looked
+    // frozen), and never one end of a time range ("10:00 - 18:00").
+    let m = t.match(/(?<![:\d])(?:(\d{1,2}):)?(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?![:\d])(?!\s*(?:[-–—]|to)\s*\d{1,2}:\d{2})/);
+    if (m && !/\d{1,2}:\d{2}\s*(?:[-–—]|to)\s*$/.test(t.slice(0, m.index))) {
+      if (m[1] !== undefined && m[2] !== undefined) return (+m[1]) * 86400 + (+m[2]) * 3600 + (+m[3]) * 60 + (+m[4]);
+      return (+(m[1] || m[2] || 0)) * 3600 + (+m[3]) * 60 + (+m[4]);
+    }
     m = t.match(/\b(?:(\d{1,2})\s*h(?:rs?|ours?)?\s*)?(\d{1,2})\s*m(?:in(?:s|utes?)?)?\s*(\d{1,2})\s*s(?:ec(?:s|onds?)?)?\b/i);
     if (m) return (+(m[1] || 0)) * 3600 + (+m[2]) * 60 + (+m[3]);
     return null;

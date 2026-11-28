@@ -369,7 +369,9 @@ def detect_language_patterns(trace: FunnelTrace, use_llm: bool = False) -> List[
             if not quoted or _norm(quoted) not in grounding:
                 continue
             code = candidate.get("pattern_code", "DP-03")
-            if code not in BY_CODE:
+            # Layer 3 judges wording for these two patterns only; a model
+            # answer naming any other code is outside what it was asked.
+            if code not in ("DP-03", "DP-11"):
                 continue
             identity = (code, _norm(quoted))
             if identity in seen:

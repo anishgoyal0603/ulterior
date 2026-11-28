@@ -438,7 +438,7 @@ _PLAN_CONTEXT = re.compile(
     re.IGNORECASE)
 
 
-def _text_near_button(state, button, chars: int = 400) -> str:
+def _text_near_button(state, button, chars: int = 400, occurrence: int = 0) -> str:
     """The page text around this button's own words (its card), so a price
     elsewhere on the page is not read as this button's offer."""
     text = _without_emi_lines(state.full_text or "")
@@ -454,11 +454,15 @@ def _text_near_button(state, button, chars: int = 400) -> str:
     for ln in lines:
         offsets.append(pos)
         pos += len(ln) + 1
-    exact = [offsets[k] + lines[k].find(label) for k, ln in enumerate(lines) if ln.strip().lower() == label.lower()]
+    low = label.lower()
+    exact = [offsets[k] + lines[k].lower().find(low) for k, ln in enumerate(lines) if ln.strip().lower() == low]
     if exact:
-        i = exact[-1]
+        # The n-th button with this text is the n-th line that is that text:
+        # a paid plan's "Subscribe" above a footer newsletter "Subscribe" is
+        # read at ITS line, not the footer's.
+        i = exact[min(occurrence, len(exact) - 1)]
     else:
-        i = text.rfind(label)
+        i = text.lower().rfind(low)
         if i < 0:
             return text
     # Only the text BEFORE the button (the offer it belongs to) and a short
@@ -485,7 +489,7 @@ def _first_commitment_state(trace: FunnelTrace):
     not a subscription trap and is present on nearly every shop.
     """
     for index, state in enumerate(trace.states):
-        for button in state.buttons:
+        for b_index, button in enumerate(state.buttons):
             if not _matches_any(button.text, COMMITMENT_CTA):
                 continue
             if _matches_any(button.text, NON_COMMITMENT_SUBSCRIBE):
@@ -510,7 +514,9 @@ def _first_commitment_state(trace: FunnelTrace):
             # The recurring price must be near THIS button, not anywhere on
             # the page: a newsletter "Subscribe" in the footer of a page whose
             # banner says "₹99/month" was taken for a paid plan's CTA.
-            near = _text_near_button(state, button)
+            occurrence = sum(1 for b in state.buttons[:b_index]
+                             if (b.text or "").strip().lower() == (button.text or "").strip().lower())
+            near = _text_near_button(state, button, occurrence=occurrence)
             if _RECURRING_PRICE_RE.search(near):
                 return state, index
             if _matches_any(near, NON_COMMITMENT_SUBSCRIBE):

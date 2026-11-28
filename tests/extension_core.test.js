@@ -239,5 +239,33 @@ test("taxes-and-fees-included wording is not a disclosure of extra charges", () 
   }
 });
 
+// --- sixth code review (November 2026) ------------------------------------
+test("terms bundled with marketing is forced action; optional or lawful boxes are not", () => {
+  const bundled = (l) => C.CONSENT_TERMS_RE.test(l) && C.CONSENT_MARKETING_RE.test(l);
+  assert.strictEqual(bundled("I agree to receive promotional offers"), false);
+  assert.strictEqual(bundled("I have read the Privacy Policy, including how my data is shared with third parties"), false);
+  assert.strictEqual(bundled("I accept the Privacy Policy and agree you may share my details with delivery partners to fulfil this order"), false);
+  assert.strictEqual(bundled("I accept the Terms to receive order updates via SMS"), false);
+  assert.strictEqual(bundled("I agree to the Terms of Use and to receive promotional offers on WhatsApp"), true);
+  assert.strictEqual(bundled("I agree to the Terms and to share my data with advertisers"), true);
+});
+
+test("multi-day timers and time ranges", () => {
+  assert.strictEqual(C.parseCountdown("02:14:33:12"), 2 * 86400 + 14 * 3600 + 33 * 60 + 12);
+  assert.notStrictEqual(C.parseCountdown("02:14:33:12"), C.parseCountdown("02:14:33:10"));
+  assert.strictEqual(C.parseCountdown("10:00 - 18:00"), null);
+  assert.strictEqual(C.parseCountdown("00:04:59"), 299);
+});
+
+test("formatINR carries paise into rupees", () => {
+  assert.strictEqual(C.formatINR(99.999), "\u20b9100");
+  assert.strictEqual(C.formatINR(1299.5), "\u20b91,299.50");
+});
+
+test("a size chart is not the kind of pop-up that nags", () => {
+  assert.strictEqual(C.DIALOG_HINT_RE.test("Size chart: chest, waist, length in cm"), false);
+  assert.strictEqual(C.DIALOG_HINT_RE.test("Get 10% off your first order! Sign up"), true);
+});
+
 if (failures) { console.log(`${failures} failed`); process.exit(1); }
 console.log("all passed");

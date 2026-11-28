@@ -45,8 +45,15 @@
       state.touched.add(c);
       if (c.tagName === "LABEL" && c.control) state.touched.add(c.control);
     }
+    // Only a DISMISSAL counts as closing a pop-up: the ×, "Close", "No
+    // thanks", "Maybe later". Picking a size or pressing "Apply" inside a
+    // size chart or address picker is using it, not refusing it.
+    const ctl = e.target.closest("button, a, [role=button], [aria-label]");
+    const words = ctl ? ((ctl.getAttribute("aria-label") || "") + " " + (ctl.innerText || ctl.textContent || "")).trim() : "";
+    const dismissal = ctl && (/^\s*([x×✕✖✗]|close|dismiss)\s*$/i.test((ctl.innerText || ctl.textContent || "").trim())
+      || /\b(close|dismiss)\b/i.test(ctl.getAttribute("aria-label") || "") || C.DECLINE_RE.test(C.normalizeQuotes(words)));
     for (const [sig, el] of state.dialogsShown) {
-      if (el.contains(e.target)) state.dialogClicks.set(sig, Date.now());
+      if (dismissal && el.contains(e.target)) state.dialogClicks.set(sig, Date.now());
     }
   }, true);
 
@@ -161,7 +168,12 @@
   async function trackDialogs() {
     const now = Date.now();
     const current = new Map();
-    for (const d of D.dialogs()) current.set(d.sig, d);
+    // Only pop-ups that ASK for something (sign in, the app, an offer, a
+    // newsletter, notifications...). A size chart or a filter drawer the
+    // shopper opened twice is not nagging.
+    for (const d of D.dialogs()) {
+      if (C.DIALOG_HINT_RE.test(D.fast(d.el).slice(0, 900))) current.set(d.sig, d);
+    }
     const key = "nag:" + SITE;
     const rec = (await P.Session.get(key)) || {};
     let changed = false;

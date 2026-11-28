@@ -517,10 +517,13 @@ async function cancelRunningAudit() {
   if (!runningJobId) return;
   const status = document.getElementById("run-status");
   try {
-    stopRequested = true;
     const r = await authFetch(`/audits/${Number(runningJobId)}/cancel`, {method: "POST"});
+    // Only once the server has accepted it: a failed request used to leave
+    // the status saying "Stopping..." for an audit that was still running.
+    stopRequested = true;
     status.textContent = r.status === "cancelled" ? "Cancelled." : "Stopping\u2026 the browser finishes its current page first.";
   } catch (err) {
+    stopRequested = false;
     status.textContent = "Could not stop it: " + err.message;
   }
 }

@@ -422,6 +422,44 @@ def test_bait_and_switch_price_rises_in_the_cart(ctx, fresh, site):
     assert "DP-08" not in codes(r), "the rise is the item's own price, not a fee"
 
 
+def test_proceeding_from_the_cart_keeps_the_price_you_picked(ctx, fresh, site):
+    """"Proceed to checkout" under a cart "Subtotal ₹348" used to replace the
+    ₹299 the shopper picked, hiding the fees already in that subtotal."""
+    fresh.goto(f"{site}/shop/flow-product.html")
+    results_for(ctx, "flow-product.html", want=lambda r: r.get("page") == "product")
+    fresh.click("#buy")
+    fresh.wait_for_url("**/flow-cart.html")
+    results_for(ctx, "flow-cart.html", wait_ms=1500)
+    fresh.click("#proceed")
+    fresh.wait_for_url("**/flow-checkout.html")
+    r = results_for(ctx, "flow-checkout.html", want=lambda r: "DP-08" in codes(r))
+    drip = next(f for f in r["findings"] if f["code"] == "DP-08")
+    assert "₹299" in drip["title"] and "₹457" in drip["title"], drip
+
+
+def test_a_quantity_beside_the_name_is_not_a_price_rise(ctx, fresh, site):
+    fresh.goto(f"{site}/shop/qty-product.html")
+    results_for(ctx, "qty-product.html", want=lambda r: r.get("page") == "product")
+    fresh.click("#buy")
+    fresh.wait_for_url("**/qty-cart.html")
+    r = results_for(ctx, "qty-cart.html", wait_ms=2500)
+    assert "DP-07" not in codes(r), r["findings"]
+
+
+def test_optional_marketing_and_lawful_notices_are_not_forced_action(ctx, fresh, site):
+    fresh.goto(f"{site}/forced/optional.html")
+    r = results_for(ctx, "forced/optional.html", wait_ms=3000, want=lambda r: r.get("page") is not None)
+    assert r and not r.get("missing"), r
+    assert "DP-04" not in codes(r), r["findings"]
+
+
+def test_a_no_thanks_faded_with_opacity_is_caught(ctx, fresh, site):
+    fresh.goto(f"{site}/modal/faded.html")
+    r = results_for(ctx, "faded.html", want=lambda r: "DP-06" in codes(r))
+    f = next(f for f in r["findings"] if f["code"] == "DP-06")
+    assert float(f["evidence"]["decline_contrast"].split(":")[0]) < 3.0, f
+
+
 def test_hard_to_see_sponsored_labels_and_readable_ones(ctx, fresh, site):
     fresh.goto(f"{site}/search/results.html")
     r = results_for(ctx, "search/results.html", want=lambda r: "DP-09" in codes(r))

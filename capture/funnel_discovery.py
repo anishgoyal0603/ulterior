@@ -387,5 +387,6 @@ def walk_discovered_funnel(start_url: str, screenshot_dir: str = DEFAULT_EVIDENC
     for note in guard.blocked:
         if note not in log.notes:
             log.notes.append(note)
+    trace.blocked_requests = list(guard.blocked)
     trace.discovery = log.as_dict()
     return trace

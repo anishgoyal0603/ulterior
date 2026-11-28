@@ -57,7 +57,10 @@
     const t = D.clickableText(btn);
     if (!t || t.length > 40 || !C.BUY_VERB_RE.test(t) || C.PAY_BUTTON_RE.test(t)) return;
     const last = root.__ulteriorLastScan;
-    if (last && last.isCheckout) return;          // on the checkout we compare, not record
+    // On the cart or checkout we compare, not record: "Proceed to checkout"
+    // under a "Subtotal ₹348" used to replace the ₹299 the shopper picked
+    // with the subtotal, which can already include the fees.
+    if ((last && last.isCheckout) || D.looksLikeCartOrCheckout()) return;
 
     let price = null, source = "the option you picked", disclosed = false, fp = [];
     const onButton = C.parseAmounts(t).filter((a) => a.value > 0);
