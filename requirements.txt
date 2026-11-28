@@ -15,7 +15,12 @@ uvicorn[standard]==0.32.*
 sqlalchemy==2.0.*
 pydantic==2.*
 reportlab==4.4.*
-playwright==1.65.*
+# EXACT pin, never a wildcard: it must match the Playwright Docker image in
+# Dockerfile and .github/workflows/ci.yml. Each patch release expects its own
+# Chromium build, so "1.65.*" installed 1.65.2 into the v1.65.0 image and no
+# browser could start (CI: "Executable doesn't exist ... chromium_headless_shell-1255").
+# Change all three together; tests/test_review_round2.py checks they agree.
+playwright==1.65.0
 anthropic==0.40.*
 
 # Test runner and HTTP client are needed by the app's own test suite, which is

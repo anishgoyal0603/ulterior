@@ -237,7 +237,7 @@ Stop the server first (**Ctrl+C**), then:
 Expect:
 
 ```
-406 passed, 90 deselected, 1 warning
+407 passed, 90 deselected, 1 warning
 ```
 
 ### Reading that line
@@ -246,7 +246,7 @@ Expect:
 that command doing exactly what you asked. `-m "not ui"` means *skip the tests
 marked `ui`* — the 90 browser tests that launch a real server and drive a real
 Chromium window. pytest is reporting how many it set aside on your
-instruction. Drop the flag and all 496 run.
+instruction. Drop the flag and all 497 run.
 
 **`1 warning` is also fine.** It comes from inside Starlette's own code, not
 this project. Ours are at zero and a test keeps them there.
@@ -503,7 +503,7 @@ every crawling browser goes through a local egress proxy that blocks DNS
 rebinding; rate limits read the real client address behind a proxy; and the
 practice-store demo works without `ALLOW_LOCAL_TARGETS`.
 
-> **Playwright was updated to 1.65.** The first time you run
+> **Playwright is pinned to exactly 1.65.0** (it must match the Docker image). The first time you run
 > `run_demo.ps1` after pulling 2.4 it installs the new version and its
 > Chromium (about 150 MB). That is expected.
 

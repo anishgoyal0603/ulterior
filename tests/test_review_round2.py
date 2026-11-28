@@ -314,3 +314,21 @@ def test_source_files_are_always_read_as_utf8():
                         and not any(k.arg == "encoding" for k in node.keywords)):
                     bad.append(f"{f.relative_to(ROOT)}:{node.lineno}")
     assert not bad, bad
+
+
+# ------------------------------------------------------------ Playwright pin
+
+def test_playwright_pin_matches_the_docker_images():
+    """requirements.txt said playwright==1.65.*, the CI and production images
+    were v1.65.0. When 1.65.2 came out, pip installed it into the v1.65.0
+    image, it looked for a Chromium build the image does not have, and every
+    browser test in CI failed. The pin must be exact and equal to both images."""
+    import re
+    req = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    m = re.search(r"^playwright==(\d+\.\d+\.\d+)\s*$", req, re.MULTILINE)
+    assert m, "playwright must be pinned to an exact version (no wildcard)"
+    pinned = m.group(1)
+    for f in ("Dockerfile", ".github/workflows/ci.yml"):
+        tags = re.findall(r"mcr\.microsoft\.com/playwright/python:v(\d+\.\d+\.\d+)",
+                          (ROOT / f).read_text(encoding="utf-8"))
+        assert tags and set(tags) == {pinned}, (f, tags, pinned)
