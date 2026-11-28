@@ -132,10 +132,16 @@ function keyBelongsToSender(key, sender) {
 // Community prices are for the listed shops only. "Scan this page" can run
 // on ANY site (a company portal, a staging store); its product ids must
 // never be sent anywhere, even though the server would refuse them.
+// Local test shops count only in a development build whose server is itself
+// local. In the store build (server on Railway) a "localhost" product was
+// someone's own dev app, and its path and price were sent to production.
 const COMMUNITY_DEV_SITES = ["127.0.0.1", "localhost"];
+const REPORTS_TO_LOCAL_SERVER = (() => {
+  try { return COMMUNITY_DEV_SITES.includes(new URL(C.REPORT_ORIGIN).hostname); } catch (e) { return false; }
+})();
 function communitySite(key) {
   const site = String(key || "").split(":")[0];
-  return C.SUPPORTED_SITES.includes(site) || COMMUNITY_DEV_SITES.includes(site);
+  return C.SUPPORTED_SITES.includes(site) || (REPORTS_TO_LOCAL_SERVER && COMMUNITY_DEV_SITES.includes(site));
 }
 
 // ---------------------------------------------------- community prices

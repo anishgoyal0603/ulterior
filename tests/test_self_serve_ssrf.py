@@ -59,10 +59,22 @@ def test_both_adapter_and_urls_rejected(client):
     assert r.status_code == 400
 
 
-def test_legitimate_self_serve_url_accepted_and_queued(client):
+def _queue_only_with_public_dns(monkeypatch):
+    """Queue the job but start no browser (a unit test must not crawl
+    example.com in a background thread), and answer the DNS lookup with a
+    public documentation address so the test needs no network."""
+    import socket
+    from app import ssrf_guard
+    monkeypatch.setattr(config, "RUN_AUDIT_WORKERS", False)
+    monkeypatch.setattr(ssrf_guard.socket, "getaddrinfo",
+                        lambda host, *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", 0))])
+
+
+def test_legitimate_self_serve_url_accepted_and_queued(client, monkeypatch):
     """A safe external URL should be accepted and actually queue a job --
     confirms this isn't just "SSRF checks work," but that the whole
     self-serve path (no adapter_name, just target_urls) functions."""
+    _queue_only_with_public_dns(monkeypatch)
     r = client.post("/audits", json={"target_urls": ["https://example.com/"], "authorization": PERMISSION})
     assert r.status_code == 200
     body = r.json()

@@ -47,6 +47,9 @@ SAFE_CHROMIUM_ARGS = [
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
     "--webrtc-ip-handling-policy=disable_non_proxied_udp",
     "--disable-features=WebRtcHideLocalIpsWithMdns",
+    # HTTP/3 runs over UDP (QUIC), which an HTTP proxy cannot carry. With it
+    # off, every connection is TCP and goes through the egress proxy.
+    "--disable-quic",
 ]
 
 # Runs before any script of the audited site, in every frame.
@@ -79,7 +82,13 @@ def new_guarded_page(browser, allow_file: bool = False, viewport: dict = None,
                      trusted_origins=None) -> Tuple[object, NavigationGuard]:
     """A page with WebRTC removed and every request -- including WebSockets
     and redirects -- checked against the SSRF rules."""
-    page = browser.new_page(viewport=viewport or DEFAULT_VIEWPORT)
-    page.add_init_script(NO_WEBRTC_SCRIPT)
-    guard = install_navigation_guard(page, allow_file=allow_file, trusted_origins=trusted_origins)
+    # Everything is installed on the CONTEXT, not the page. A hostile page
+    # can open new pages (window.open, target=_blank); context-level routes
+    # and init scripts cover every page and popup in it, where page-level
+    # ones covered only the first. Service workers are blocked: requests a
+    # worker makes are not seen by route() at all.
+    context = browser.new_context(viewport=viewport or DEFAULT_VIEWPORT, service_workers="block")
+    context.add_init_script(NO_WEBRTC_SCRIPT)
+    guard = install_navigation_guard(context, allow_file=allow_file, trusted_origins=trusted_origins)
+    page = context.new_page()
     return page, guard

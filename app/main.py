@@ -752,7 +752,11 @@ def get_demo_audit(job_id: int = PathParam(..., ge=1, lt=2**63, description="Aud
     if not config.PUBLIC_DEMO_ENABLED:
         raise HTTPException(status_code=404, detail="Not found")
     job = db.get(models.AuditJob, job_id)
-    if not job or job.adapter_name not in config.PUBLIC_DEMO_ADAPTERS:
+    # The ORG is what makes a run public, not the storefront it audited: a
+    # team or customer audit of the same practice store (with its reviewer
+    # and review notes) must not be readable here without a key.
+    if (not job or job.org != config.DEMO_ORG
+            or job.adapter_name not in config.PUBLIC_DEMO_ADAPTERS):
         raise HTTPException(status_code=404, detail="Demo audit not found")
     return _to_job_out(job)
 

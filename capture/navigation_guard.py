@@ -85,6 +85,8 @@ class NavigationGuard:
             return False
 
     def install(self, page) -> None:
+        """`page` may be a Page or a BrowserContext; capture/browser.py
+        passes the context so that popups are guarded too."""
         def handler(route):
             url = route.request.url
             if self._is_allowed(url):

@@ -84,7 +84,6 @@ GUILT_PATTERNS = [
     r"like (paying )?full price",
     r"don'?t (mind )?miss(ing)? out",
     r"don'?t want \d+%",
-    r"'?d like \d+% off",
     # "No, not interested" is the neutral way to decline and is not guilt;
     # the extension already left it out.
     r"\bhate (saving|cool)\b",
@@ -197,6 +196,9 @@ def _offline_trick_wording(state: PageState) -> List[dict]:
             found.append({
                 "pattern_code": "DP-11", "quoted_text": label,
                 "confidence": 0.8,
+                # DOM state and wording agree: the one DP-11 shape with two
+                # independent signals, so the only one above INDICATIVE.
+                "two_signals": True,
                 "explanation": (
                     "This control arrived already ticked while its label is phrased as an "
                     "opt-out, so the tick and the wording point in opposite directions and the "
@@ -275,10 +277,19 @@ def _parse_model_json(text: str) -> dict:
     around it. Read the first {...} object rather than failing silently."""
     t = (text or "").strip()
     t = re.sub(r"^```(?:json)?\s*|\s*```$", "", t, flags=re.IGNORECASE).strip()
-    start, end = t.find("{"), t.rfind("}")
-    if start == -1 or end <= start:
-        raise ValueError("no JSON object in the model reply")
-    return json.loads(t[start:end + 1])
+    # raw_decode reads ONE object starting at each "{" and stops at its end,
+    # so braces in prose before or after the JSON cannot break it.
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(t):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(t, i)
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    raise ValueError("no JSON object in the model reply")
 
 
 def detect_language_patterns(trace: FunnelTrace, use_llm: bool = False) -> List[Violation]:
@@ -320,7 +331,12 @@ def detect_language_patterns(trace: FunnelTrace, use_llm: bool = False) -> List[
                 continue  # offline and LLM found the same thing -- report once
             seen.add(identity)
 
-            tier = CORROBORATED if code == "DP-11" else INDICATIVE
+            # Only a finding where two independent signals agree (a
+            # pre-ticked control AND opt-out wording) is CORROBORATED. A
+            # double negative alone, or anything the model suggested, is a
+            # single signal: INDICATIVE, as in the extension.
+            tier = (CORROBORATED if code == "DP-11" and candidate.get("two_signals")
+                    and sources.get(id(candidate)) == "offline_rules" else INDICATIVE)
             violations.append(Violation(
                 pattern_code=code, pattern_name=BY_CODE[code].name,
                 step_name=state.step_name,

@@ -36,6 +36,11 @@ logger = logging.getLogger(__name__)
 
 _MAX_HEAD = 64 * 1024
 _IDLE_SECONDS = 120
+# When the browser closes its side of an HTTPS tunnel, the server side gets
+# this long to finish, then both are torn down. Waiting for the server's own
+# FIN instead kept every tunnel (and its upstream socket) open for up to
+# _IDLE_SECONDS after each audit, because CDNs hold idle TLS open that long.
+_TUNNEL_DRAIN_SECONDS = 2
 
 
 def _default_resolver(host: str, port: int) -> List[str]:
@@ -135,6 +140,8 @@ class EgressProxy:
             if method.upper() == "CONNECT":
                 host, _, port_s = target.rpartition(":")
                 port = int(port_s or 443)
+                if not host or not 1 <= port <= 65535:
+                    return await self._reply(writer, 400, "Bad CONNECT target")
                 rest = b""
             else:
                 url = urlsplit(target)
@@ -173,12 +180,8 @@ class EgressProxy:
             else:
                 upstream_writer.write(rest)
                 await upstream_writer.drain()
-            # Client -> server may finish first (a half-close after the
-            # request); that must not tear down the reply. The exchange is
-            # over when the SERVER side finishes; then the other pipe stops.
-            upload = asyncio.ensure_future(self._pipe(reader, upstream_writer))
-            await self._pipe(up_reader, writer)
-            upload.cancel()
+            await self._relay(reader, upstream_writer, up_reader, writer,
+                              tunnel=method.upper() == "CONNECT")
         except (asyncio.TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError,
                 ConnectionError, OSError, ValueError):
             pass
@@ -189,6 +192,28 @@ class EgressProxy:
                         w.close()
                     except Exception:
                         pass
+
+    async def _relay(self, reader, upstream_writer, up_reader, writer, tunnel: bool) -> None:
+        """Run both directions until the exchange is over, then stop both.
+
+        Over when the SERVER side finishes. If the CLIENT side finishes first:
+          * plain HTTP -- a half-close after the request is legal and the
+            reply must still arrive, so the download keeps its full idle time;
+          * CONNECT tunnel -- the browser has closed the tab or the socket;
+            the server gets _TUNNEL_DRAIN_SECONDS and is then cut off.
+        Both tasks are always cancelled AND awaited, so none is left pending.
+        """
+        upload = asyncio.ensure_future(self._pipe(reader, upstream_writer))
+        download = asyncio.ensure_future(self._pipe(up_reader, writer))
+        try:
+            done, _ = await asyncio.wait({upload, download}, return_when=asyncio.FIRST_COMPLETED)
+            if download not in done:
+                grace = _TUNNEL_DRAIN_SECONDS if tunnel else _IDLE_SECONDS
+                await asyncio.wait({download}, timeout=grace)
+        finally:
+            for task in (upload, download):
+                task.cancel()
+            await asyncio.gather(upload, download, return_exceptions=True)
 
     @staticmethod
     async def _pipe(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:

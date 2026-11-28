@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Text, ForeignKey, Index
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -8,6 +8,10 @@ Base = declarative_base()
 
 class AuditJob(Base):
     __tablename__ = "audit_jobs"
+    # One audit per (workspace, Idempotency-Key). Checking first and inserting
+    # second let two identical POSTs arriving together both create a job; the
+    # database index is what makes "the same request twice is one audit" true.
+    __table_args__ = (Index("uq_audit_jobs_org_idempotency", "org", "idempotency_key", unique=True),)
 
     id = Column(Integer, primary_key=True, index=True)
     site_name = Column(String(200))

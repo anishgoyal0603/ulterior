@@ -201,9 +201,21 @@ def test_the_dashboard_loads_no_script_from_another_origin(client):
         )
 
 
-def test_self_serve_urls_are_accepted_by_the_api(client):
+def _queue_only_with_public_dns(monkeypatch):
+    """Queue the job but start no browser (a unit test must not crawl
+    example.com in a background thread), and answer the DNS lookup with a
+    public documentation address so the test needs no network."""
+    import socket
+    from app import config, ssrf_guard
+    monkeypatch.setattr(config, "RUN_AUDIT_WORKERS", False)
+    monkeypatch.setattr(ssrf_guard.socket, "getaddrinfo",
+                        lambda host, *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", 0))])
+
+
+def test_self_serve_urls_are_accepted_by_the_api(client, monkeypatch):
     """The dashboard's URL box posts target_urls. This asserts the contract it
     depends on: a list of public URLs is accepted and becomes a job."""
+    _queue_only_with_public_dns(monkeypatch)
     r = client.post("/audits", json={"target_urls": ["https://example.com/cart"], "authorization": PERMISSION})
     assert r.status_code == 200, r.text
     assert r.json()["adapter_name"] == "self-serve"

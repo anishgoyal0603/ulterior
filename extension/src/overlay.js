@@ -152,9 +152,12 @@
       input.min = "1";
       // The page re-renders this panel whenever it changes. Keep what the
       // shopper is typing (and the cursor in the box) instead of resetting it.
+      // Keyed by product: on a single-page shop, a target typed for one
+      // product must not reappear in the box for the next one.
+      if (typed && typed.key !== price.key) typed = null;
       input.value = typed ? typed.value : String(C.suggestTarget(price.current));
       input.setAttribute("aria-label", "Target price in rupees");
-      input.addEventListener("input", () => { typed = { value: input.value, focused: true }; });
+      input.addEventListener("input", () => { typed = { key: price.key, value: input.value, focused: true }; });
       input.addEventListener("blur", () => { if (typed) typed.focused = false; });
       if (typed && typed.focused) refocus = input;
       const watch = el("button", "btn primary", "Watch price");
@@ -174,7 +177,7 @@
    * not to see it on this site again this session. opts.price: the price
    * check for a product page (shown even with no findings).
    */
-  let typed = null;      // {value, focused}: the target price being typed
+  let typed = null;      // {key, value, focused}: the target price being typed, for which product
   let refocus = null;
 
   function render(findings, site, opts) {

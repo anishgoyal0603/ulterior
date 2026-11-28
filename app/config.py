@@ -113,6 +113,12 @@ def _parse_keys(raw: str):
         if not key or not _ORG_NAME.match(org):
             bad.append(org or "(empty)")
             continue
+        if key in orgs:
+            # The same key listed for two organisations silently belonged to
+            # whichever came last -- one customer could read another's audits.
+            if orgs[key] != org:
+                bad.append(f"{org} (that key is already {orgs[key]}'s)")
+            continue
         keys.append(key)
         orgs[key] = org
     return keys, orgs, bad
@@ -231,9 +237,10 @@ def validate() -> None:
                 )
             if _BAD_KEY_ENTRIES:
                 problems.append(
-                    "API_KEYS has entries with an invalid organisation name "
+                    "API_KEYS has invalid entries "
                     f"({', '.join(_BAD_KEY_ENTRIES)}). Use org:key with a lowercase "
-                    "name of letters, digits, '-' or '_'."
+                    "name of letters, digits, '-' or '_', and give each organisation "
+                    "its own key."
                 )
             if not _raw_admin:
                 problems.append(

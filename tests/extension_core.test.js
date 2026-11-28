@@ -199,5 +199,16 @@ test("phones are redacted, but not the tail of a longer code", () => {
   assert.strictEqual(C.redact("SKU9876543210"), "SKU9876543210");
 });
 
+// --- third code review (November 2026) ------------------------------------
+test("deadline wording with a clock is urgency", () => {
+  assert.ok(C.URGENCY_PATTERNS.some((p) => p.test("Deal ends in 00:04:59")));
+  assert.ok(C.URGENCY_PATTERNS.some((p) => p.test("Offer expires in 2h")));
+});
+
+test("wallet balance and cashback are benefits, not add-ons", () => {
+  assert.ok(C.BENEFIT_RE.test("Use my \u20b950 wallet balance"));
+  assert.ok(C.BENEFIT_RE.test("Apply \u20b9100 cashback"));
+});
+
 if (failures) { console.log(`${failures} failed`); process.exit(1); }
 console.log("all passed");

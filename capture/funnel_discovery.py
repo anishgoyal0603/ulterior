@@ -236,7 +236,9 @@ def walk_discovered_funnel(start_url: str, screenshot_dir: str = DEFAULT_EVIDENC
 
     log = DiscoveryLog()
     refused_controls = 0
-    trace = FunnelTrace(site_name=site_name or (start_url.split("/")[2] if "//" in start_url else start_url))
+    from urllib.parse import urlsplit
+    # Host only: never a query string or a local file path.
+    trace = FunnelTrace(site_name=site_name or urlsplit(start_url).hostname or "local page")
 
     with playwright_session() as p:
         browser = launch_browser(p, headless=headless)

@@ -29,6 +29,7 @@ import threading
 from typing import List, Optional
 
 import os
+from urllib.parse import urlsplit
 
 from capture.funnel_walker import walk_funnel, DEFAULT_EVIDENCE_DIR
 from capture.funnel_discovery import walk_discovered_funnel
@@ -41,6 +42,7 @@ from .privacy import redact, redact_evidence, redact_list
 from .integrity import build_manifest
 from . import config
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from detectors.coverage import assess_coverage
 from .ssrf_guard import validate_target_url, UnsafeURLError
 
@@ -90,7 +92,10 @@ def _build_adhoc_adapter(target_urls: List[str]) -> SiteAdapter:
     for i, url in enumerate(target_urls, start=1):
         validate_target_url(url)  # raises UnsafeURLError, caught by the caller
         steps.append(FunnelStep(name=f"step_{i}", url=url))
-    site_name = target_urls[0].split("/")[2] if target_urls else "self-serve audit"
+    # The host only. split("/")[2] kept "?token=..." when a URL had no path
+    # ("https://shop.example?token=secret"), and site_name is printed on the
+    # report and stored for the audit's lifetime.
+    site_name = (urlsplit(target_urls[0]).hostname or "self-serve audit") if target_urls else "self-serve audit"
     return SiteAdapter(site_name=site_name, funnel_steps=steps)
 
 
@@ -299,7 +304,13 @@ def submit_audit_job(adapter_name: Optional[str] = None, target_urls: Optional[L
                         .filter(AuditJob.idempotency_key == idempotency_key, AuditJob.org == org)
                         .first())
             if existing is not None:
-                return existing.id     # the same request sent twice makes one audit
+                if existing.status not in ("failed", "cancelled"):
+                    return existing.id     # the same request sent twice makes one audit
+                # A retry after a failure or a stop is a NEW attempt. Reusing
+                # the key used to hand back the dead audit forever. The old
+                # row gives the key up so the new one can hold it.
+                existing.idempotency_key = None
+                db.flush()
 
         active = (db.query(AuditJob)
                   .filter(AuditJob.status.in_(("pending", "running")),
@@ -319,7 +330,17 @@ def submit_audit_job(adapter_name: Optional[str] = None, target_urls: Optional[L
                                      "use_llm": bool(use_llm), "auto_discover": bool(auto_discover)}),
         )
         db.add(job)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # Another request with the same key won the race: it is this audit.
+            db.rollback()
+            winner = (db.query(AuditJob)
+                      .filter(AuditJob.idempotency_key == idempotency_key, AuditJob.org == org)
+                      .first()) if idempotency_key else None
+            if winner is None:
+                raise
+            return winner.id
         db.refresh(job)
         job_id = job.id
     finally:

@@ -11,7 +11,7 @@ import re
 from types import SimpleNamespace
 
 from .taxonomy import BY_CODE, PROVABLE, CORROBORATED, INDICATIVE, clamp_confidence
-from .vocab import is_recurring_label
+from .vocab import BENEFIT_RE, DECLINE_CHOICE_RE, PAID_ADDON_RE, is_recurring_label
 from capture.funnel_walker import FunnelTrace
 from capture.state_extractor import PageState, format_money, parse_money
 
@@ -81,6 +81,18 @@ _SUBTOTAL = re.compile(r"\b(sub[\s-]?total|item(s)? total|cart total|bag total)\
 _FINAL_TOTAL = re.compile(
     r"\b(grand total|order total|total amount|total payable|amount payable|net payable|"
     r"you pay|to pay|payable|total)\b", re.IGNORECASE)
+# The labels that name the amount actually charged. They outrank a bare
+# "Total", which also heads "Total items" and similar rows.
+_PAYABLE = re.compile(
+    r"\b(grand total|order total|total amount|total payable|amount payable|net payable|"
+    r"amount to pay|you pay|to pay)\b", re.IGNORECASE)
+# Rows that contain the word "total" but are not the amount owed. Indian
+# checkouts print "Total Savings ₹150" or "Total Discount ₹130" BELOW the order
+# total; reading that as the last total turned a ₹457 order into ₹150 and
+# silenced DP-08 on exactly the checkouts it exists for.
+_NOT_A_TOTAL = re.compile(
+    r"\b(savings?|saved|save|discounts?|cash\s*back|off|rewards?|points|coins|m\.?r\.?p\.?|"
+    r"you\s+saved|total\s+(items?|qty|quantity))\b", re.IGNORECASE)
 
 
 def _stated_total(state: "PageState") -> Optional[float]:
@@ -91,12 +103,20 @@ def _stated_total(state: "PageState") -> Optional[float]:
     first price on the page, the sum of whatever rows a scanner found -- is
     the crawler's inference, and inferences are what produced a PROVABLE
     accusation built from a shipping banner and a product shelf.
+
+    Ranked: an explicit payable label ("Amount payable", "Order total") beats
+    a bare "Total", which beats a "Subtotal". Within a rank the LAST one on
+    the page wins. Savings, discount and promotional-threshold rows are never
+    totals ("Free delivery on total orders over ₹500" is a condition).
     """
+    from capture.state_extractor import _PROMO_THRESHOLD_RE
     lines = [ln.strip() for ln in (state.full_text or "").splitlines() if ln.strip()]
-    final = sub = None
+    best = {}                     # rank -> amount (last seen)
     for i, line in enumerate(lines):
         is_sub = bool(_SUBTOTAL.search(line))
         if not is_sub and not _FINAL_TOTAL.search(line):
+            continue
+        if _NOT_A_TOTAL.search(line) or _PROMO_THRESHOLD_RE.search(line):
             continue
         amount = parse_money(line)
         if not amount and i + 1 < len(lines) and not _STATES_A_TOTAL.search(lines[i + 1]):
@@ -105,16 +125,13 @@ def _stated_total(state: "PageState") -> Optional[float]:
             amount = parse_money(lines[i + 1])
         if not amount:
             continue
-        # Keep going: the LAST total on the page is the payable one.
-        if is_sub:
-            sub = amount
-        else:
-            final = amount
+        rank = 1 if is_sub else (3 if _PAYABLE.search(line) else 2)
+        best[rank] = amount
     # A subtotal is never preferred to a real total ("Subtotal ₹299 ... Total
     # ₹457" is a ₹457 order). But a cart drawer that states ONLY a subtotal
     # is still the shop's own figure for the basket, and better than a
     # number the crawler picked off the page.
-    return final if final is not None else sub
+    return best[max(best)] if best else None
 
 
 def _is_an_order_breakdown(first: "PageState", last: "PageState") -> bool:
@@ -226,6 +243,15 @@ def detect_drip_pricing(trace: FunnelTrace) -> List[Violation]:
         cur = last.price_currency or first.price_currency or ""
         undisclosed = [li for li in last.line_items if li["name"] not in ("", None)
                         and li["price"] > 0 and not _named_as_a_charge(li["name"], first.full_text)]
+        # The product itself is not an undisclosed charge. At checkout it is
+        # usually renamed ("Cotton Shirt (Size M)"), so its name never matches
+        # the product page; it is recognised by costing the price that page
+        # showed. Only one row is removed -- two rows at that price means the
+        # second is something else.
+        for li in undisclosed:
+            if abs(li["price"] - first.price) <= max(first.price * 0.02, 1):
+                undisclosed.remove(li)
+                break
 
         # DP-08 is about charges the shop did NOT disclose up front -- that is
         # what "drip" means. The list above already works out which additions
@@ -302,9 +328,29 @@ def detect_basket_sneaking_and_prechecked(trace: FunnelTrace) -> List[Violation]
                 # counts are the first thing a hostile reviewer takes apart.
                 if is_recurring_label(cb.label_text):
                     continue
-                matches_charge = any(name in cb.label_text.lower() for name in chargeable_names) \
-                    or re.search(r"[₹$€£¥]", cb.label_text) or "insurance" in cb.label_text.lower() \
-                    or "protection" in cb.label_text.lower()
+                label = (cb.label_text or "").replace("\u2019", "'")
+                # Pre-ticked to GIVE something (wallet balance, cashback, a
+                # coupon) or to record a preference: not an added charge.
+                if BENEFIT_RE.search(label):
+                    continue
+                # A radio group is a required choice (shipping speed, payment
+                # method, size). Its default is basket sneaking only when the
+                # same group offers an explicit "no" the shop passed over.
+                if getattr(cb, "input_type", "checkbox") == "radio" and not any(
+                        other is not cb and getattr(other, "input_type", "") == "radio"
+                        and getattr(other, "group", "") == getattr(cb, "group", "")
+                        and getattr(cb, "group", "")
+                        and DECLINE_CHOICE_RE.search(other.label_text or "")
+                        for other in state.checkboxes):
+                    continue
+                amount = parse_money(label)
+                if re.search(r"[-\u2212]\s*(?:[₹$€£]|\brs\.?|\binr\b)", label, re.IGNORECASE):
+                    amount = None          # "-₹50": a credit, not a charge
+                # A positive amount in any currency form ("₹199", "Rs. 199",
+                # "INR 199"); ₹0 and credits ("-₹50") are not charges.
+                matches_charge = (amount is not None and amount > 0) \
+                    or any(name and name in label.lower() for name in chargeable_names) \
+                    or bool(PAID_ADDON_RE.search(label))
                 if matches_charge:
                     identity = (cb.id, cb.label_text)
                     if identity in seen:
@@ -473,9 +519,13 @@ def _clock_to_seconds(value: str):
 # page carrying a seats-left message was reported at CORROBORATED 0.9 for
 # "a countdown that does not count down". A clock is only a countdown when the
 # words next to it claim a deadline.
+#
+# "Hurry" is not a deadline either: "Hurry! 07:15 DEL -- Only 3 seats left"
+# put a departure time within reach of the word, and it was read as a frozen
+# countdown.
 _DEADLINE_PATTERNS = (
     "offer ends", "sale ends", "limited time", "ends in", "expires",
-    "deal ends", "hurry",
+    "deal ends",
 )
 
 # Digits that belong to a PRICE are not a scarcity count. "Rs 7,475 Only 2
@@ -696,6 +746,7 @@ def detect_bait_and_switch(trace: FunnelTrace) -> List[Violation]:
         current, nxt = trace.states[i], trace.states[i + 1]
         controls = list(current.buttons) + [
             SimpleNamespace(text=getattr(link, "text", "") or "") for link in (current.links or [])]
+        promises = []
         for btn in controls:
             text = btn.text or ""
             # "Save ₹500 on orders above ₹4,999" promises a discount on a
@@ -709,9 +760,17 @@ def detect_bait_and_switch(trace: FunnelTrace) -> List[Violation]:
             if len(claimed_prices) != 1:
                 continue      # no price, or several: not one checkable promise
             try:
-                claimed = float(claimed_prices[0].replace(",", ""))
+                promises.append((btn, float(claimed_prices[0].replace(",", ""))))
             except ValueError:
                 continue
+        # The crawler does not record WHICH control it followed. On a results
+        # page with three fares ("Book ₹4,199", "Book ₹4,599", "Book ₹5,050"),
+        # following the ₹4,599 one and landing on ₹4,599 reported the OTHER
+        # two as bait and switch. Only a step with a single priced promise
+        # says which promise the next page must keep.
+        if len({claimed for _, claimed in promises}) != 1:
+            continue
+        for btn, claimed in promises[:1]:
             if nxt.price is not None and abs(nxt.price - claimed) > max(claimed * 0.02, 1):
                 violations.append(Violation(
                     pattern_code="DP-07", pattern_name=BY_CODE["DP-07"].name,

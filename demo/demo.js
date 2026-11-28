@@ -137,7 +137,10 @@ async function runAudit() {
     }
 
     const started = Date.now();
-    const poll = setInterval(async () => {
+    // Chained timeouts, not setInterval: the next poll starts only after
+    // this one has finished, so a slow response cannot overlap the next.
+    let stopped = false;
+    const tick = async () => {
       // fetch() only rejects on a NETWORK failure -- the server going away,
       // the wifi dropping. An HTTP error still resolves, which is why both
       // are handled here. Either one escaping this callback would reject
@@ -148,7 +151,7 @@ async function runAudit() {
       try {
         const pollResponse = await fetch("/demo-audit/" + created.id);
         if (!pollResponse.ok) {
-          clearInterval(poll);
+          stopped = true;
           setRunning(false);
           // Say what actually happened. "Lost contact with the server (429)"
           // was shown while the server was answering perfectly well: a 429 is
@@ -172,7 +175,7 @@ async function runAudit() {
         }
         job = await pollResponse.json();
       } catch (pollErr) {
-        clearInterval(poll);
+        stopped = true;
         setRunning(false);
         setStatus("Lost contact with the server \u2014 is it still running in "
                   + "the terminal?", true);
@@ -182,7 +185,7 @@ async function runAudit() {
       if (job.status === "running") setStatus(`Walking the funnel\u2026 ${seconds}s`, false);
 
       if (job.status === "done" || job.status === "failed" || job.status === "cancelled") {
-        clearInterval(poll);
+        stopped = true;
         setRunning(false);
         // Show WHAT failed, not just that it did. error_message already
         // carries the exception type and job id -- the server deliberately
@@ -202,11 +205,16 @@ async function runAudit() {
       // A funnel walk with two reloads takes ~10s; 90s means something is
       // genuinely wrong and the page should say so rather than spin forever.
       if (seconds > 90) {
-        clearInterval(poll);
+        stopped = true;
         setRunning(false);
         setStatus("Timed out after 90s \u2014 check the terminal running the server", true);
       }
-    }, 900);
+    };
+    const loop = async () => {
+      await tick();
+      if (!stopped) setTimeout(loop, 900);
+    };
+    setTimeout(loop, 900);
   } catch (err) {
     setRunning(false);
     setStatus(String(err.message || err), true);

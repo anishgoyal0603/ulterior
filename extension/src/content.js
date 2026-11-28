@@ -25,6 +25,7 @@
     touched: new WeakSet(),              // choices the person changed themselves
     timers: new Map(),                   // live-countdown samples, by position on the page
     timerFindings: [],
+    path: location.pathname,             // the route the timer state belongs to
     settings: { overlay: true, history: true, priceCheck: true },
     hidden: false,
     lastResults: null,
@@ -65,6 +66,7 @@
    * where it left off is an honest deadline. Either way: no finding.
    */
   async function checkTimers() {
+    const path = location.pathname;
     const found = D.findCountdowns();
     if (!found.length) return;
     const t0 = Date.now();
@@ -74,6 +76,7 @@
     const idOf = (f) => (f.ctx || "").replace(/\d+/g, "#").replace(/\s+/g, " ").trim().slice(0, 60);
     found.forEach((f) => state.timers.set(idOf(f), { first: f.sec, at: t0, ctx: f.ctx }));
     await new Promise((r) => setTimeout(r, 3500));
+    if (location.pathname !== path) return;        // the shopper moved on: these readings are stale
     const again = D.findCountdowns();
     const findings = [];
     for (const cur of again) {
@@ -107,10 +110,22 @@
         });
       }
     }
-    if (findings.length) {
+    if (findings.length && location.pathname === path) {
       state.timerFindings = findings;
       scan();
     }
+  }
+
+  /** Single-page apps change the route with history.pushState, so this
+   *  script is not loaded again. Timer readings and findings belong to the
+   *  page they were taken on: on a new route they are dropped and the new
+   *  page's timers are checked. */
+  function onRouteChange() {
+    if (location.pathname === state.path) return;
+    state.path = location.pathname;
+    state.timers.clear();
+    state.timerFindings = [];
+    checkTimers();
   }
 
   // ----------------------------------------------------------- nagging
@@ -167,6 +182,7 @@
   let running = false, again = false, lastDuration = 0, lastSignature = "";
 
   async function scan() {
+    onRouteChange();
     if (running) { again = true; return; }
     running = true;
     const began = performance.now();

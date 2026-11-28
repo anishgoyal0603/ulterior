@@ -438,6 +438,8 @@ def test_a_virus_scare_with_a_download_is_rogue_malware(ctx, fresh, site):
     r = results_for(ctx, "scare/page.html", want=lambda r: "DP-13" in codes(r))
     f = next(f for f in r["findings"] if f["code"] == "DP-13")
     assert f["evidence"]["executable_link"] == "cleaner.apk", f
+    # Presentation only: never above indicative, as on the server.
+    assert f["tier"] == "indicative", f
 
 
 def test_a_hindi_checkout_is_read_too(ctx, fresh, site):

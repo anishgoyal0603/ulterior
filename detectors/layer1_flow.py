@@ -25,7 +25,7 @@ from .taxonomy import BY_CODE, PROVABLE, CORROBORATED, INDICATIVE, clamp_confide
 from .vocab import RECURRING_BILLING_TERMS, matches_any as _matches_any, is_recurring_label  # noqa: F401
 from .layer1_rules import Violation
 from capture.funnel_walker import FunnelTrace
-from capture.state_extractor import PageState
+from capture.state_extractor import PageState, parse_money
 
 
 # --- Shared vocabulary ----------------------------------------------------
@@ -288,7 +288,7 @@ def detect_subscription_trap(trace: FunnelTrace) -> List[Violation]:
     # (a) recurring terms disclosed late
     offer_state, offer_index = _first_commitment_state(trace)
     if offer_state is not None:
-        offer_disclosure = _matches_any(offer_state.full_text, RECURRING_BILLING_TERMS)
+        offer_disclosure = _matches_any(_without_emi_lines(offer_state.full_text), RECURRING_BILLING_TERMS)
         if not offer_disclosure:
             for later in trace.states[offer_index + 1:]:
                 late_disclosure = _matches_any(_without_emi_lines(later.full_text), RECURRING_BILLING_TERMS)
@@ -355,7 +355,7 @@ def detect_subscription_trap(trace: FunnelTrace) -> List[Violation]:
     # compliant corpus already covers.
     has_recurring = (
         offer_state is not None
-        and any(_matches_any(s.full_text, RECURRING_BILLING_TERMS) for s in trace.states)
+        and any(_matches_any(_without_emi_lines(s.full_text), RECURRING_BILLING_TERMS) for s in trace.states)
     )
     if has_recurring and not cancel_steps:
         route_found = False
@@ -461,7 +461,9 @@ def _first_commitment_state(trace: FunnelTrace):
             # recurring price makes it a commitment whatever the surrounding
             # words, and mailing-list language with no recurring price makes
             # it a newsletter.
-            text = state.full_text or ""
+            # EMI lines ("EMI from ₹105/month") are a way to pay for one
+            # purchase; they must not make "Join now" look like a paid plan.
+            text = _without_emi_lines(state.full_text or "")
             if _RECURRING_PRICE_RE.search(text):
                 return state, index
             if _matches_any(button.text, _WEAK_COMMITMENT_CTA) and not _PLAN_CONTEXT.search(text):
@@ -556,6 +558,21 @@ def detect_nagging(trace: FunnelTrace) -> List[Violation]:
 
 # --- DP-12 SaaS Billing ---------------------------------------------------
 
+def _is_billing_cycle_choice(control, controls) -> bool:
+    """A radio whose every alternative is ALSO a paid recurring plan
+    ("Monthly ₹199/month" vs "Annual ₹1,999/year"). The shopper has already
+    chosen to subscribe; the radio only picks the cycle, and one of the two
+    has to be selected. That is not a repeating charge opted into on their
+    behalf. It is when an alternative is free, one-off or a "no"."""
+    group = getattr(control, "group", "") or ""
+    if getattr(control, "input_type", "") != "radio" or not group:
+        return False
+    peers = [c for c in controls if c is not control and getattr(c, "input_type", "") == "radio"
+             and getattr(c, "group", "") == group]
+    return bool(peers) and all(
+        is_recurring_label(p.label_text) and (parse_money(p.label_text) or 0) > 0 for p in peers)
+
+
 def detect_saas_billing(trace: FunnelTrace) -> List[Violation]:
     """
     DP-12: a repeating charge the user never affirmatively agreed to.
@@ -579,7 +596,11 @@ def detect_saas_billing(trace: FunnelTrace) -> List[Violation]:
             if not control.is_prechecked:
                 continue
             matched = _matches_any(control.label_text, RECURRING_BILLING_TERMS)
-            if not matched:
+            if not matched or not is_recurring_label(control.label_text):
+                continue          # no billing words, or an EMI/instalment option
+            if parse_money(control.label_text) == 0:
+                continue          # a ₹0 / free tier costs nothing, recurring or not
+            if _is_billing_cycle_choice(control, state.checkboxes):
                 continue
             identity = (control.id, control.label_text)
             if identity in seen:

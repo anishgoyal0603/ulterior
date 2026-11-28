@@ -196,7 +196,7 @@ async function loadAdapters() {
 let runningJobId = null;
 let stopRequested = false;
 function endAuditRun() {
-  clearInterval(pollTimer);
+  clearTimeout(pollTimer);
   pollTimer = null;
   runningJobId = null;
   stopRequested = false;
@@ -262,7 +262,10 @@ async function startAudit(payload, btn) {
   runningJobId = job.id;
   document.getElementById("cancel-audit").hidden = false;
 
-  pollTimer = setInterval(async () => {
+  // Chained timeouts, not setInterval: the next poll is scheduled only after
+  // this one has finished, so a slow response can never overlap the next
+  // request (setInterval fired again while the previous fetch was pending).
+  const tick = async () => {
     const secs = Math.round((Date.now() - started) / 1000);
 
     // The poll used to await this fetch with NO error handling. One failed
@@ -323,7 +326,13 @@ async function startAudit(payload, btn) {
       showJob(j);
       loadDashboard({keepSelection: true}).catch(showConnectionError);
     }
-  }, 1000);
+  };
+  const loop = async () => {
+    if (runningJobId !== job.id) return;          // this run was ended or replaced
+    await tick();
+    if (runningJobId === job.id) pollTimer = setTimeout(loop, 1000);
+  };
+  pollTimer = setTimeout(loop, 1000);
 }
 
 function runAudit() {
@@ -842,6 +851,22 @@ async function loadDashboard(opts) {
   const keep = opts && opts.keepSelection && JOBS.find(j => j.id === selectedJobId);
   if (keep) showJob(keep);
   else if (jobs.length) showJob(jobs[0]);
+  else clearJobPanel();
+}
+
+/** No audits in this workspace. Changing from the team key to an empty
+ *  customer key in the same tab left the team's last audit (findings,
+ *  review, PDF button) on screen under the customer's key. */
+function clearJobPanel() {
+  selectedJobId = null;
+  baselineId = null;
+  document.getElementById("violations-title").textContent = "No audits in this workspace yet";
+  document.getElementById("violations-table").replaceChildren();
+  document.getElementById("download-pdf").hidden = true;
+  const disc = document.getElementById("discovery-report");
+  disc.replaceChildren();
+  disc.hidden = true;
+  document.getElementById("job-trust").hidden = true;
 }
 
 /**
@@ -858,6 +883,9 @@ async function downloadReport() {
   try {
     const extra = baselineId ? `?baseline=${Number(baselineId)}` : "";
     const r = await fetch(`${API}/audits/${Number(selectedJobId)}/report.pdf${extra}`, opts);
+    // 403 with a key is "not for your organisation", not a bad key: say so
+    // without locking the dashboard (as authFetch does).
+    if (r.status === 403 && key) throw new Error("This report is not available for your organisation.");
     if (r.status === 401 || r.status === 403) { setAuthState(key ? "bad" : "locked"); askForKey(); return; }
     if (!r.ok) throw new Error(`The report could not be made (${r.status}).`);
     const url = URL.createObjectURL(await r.blob());

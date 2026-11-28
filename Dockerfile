@@ -11,6 +11,14 @@ RUN pip install --no-cache-dir -r requirements.txt -r requirements-prod.txt
 
 COPY . .
 
+# Run as the image's unprivileged user, never root: this process drives a
+# browser through untrusted websites, and a Chromium escape should land in an
+# account that owns nothing but the app. /app (SQLite in development, default
+# evidence folder) and /data (the evidence volume in docker-compose) are made
+# writable for it.
+RUN mkdir -p /data/evidence && chown -R pwuser:pwuser /app /data
+USER pwuser
+
 EXPOSE 8000
 # Lets Docker / docker compose see when the app stops answering. (Railway
 # uses its own healthcheck setting; point it at /healthz.)

@@ -13,12 +13,54 @@ DATABASE_URL = config.DATABASE_URL
 _connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
 engine = create_engine(DATABASE_URL, connect_args=_connect_args, pool_pre_ping=True)
+
+if DATABASE_URL.startswith("sqlite"):
+    from sqlalchemy import event
+
+    @event.listens_for(engine, "connect")
+    def _sqlite_pragmas(dbapi_conn, _record):
+        """SQLite is the development database, but since 2.4 it has several
+        writers at once: audit workers, a heartbeat thread per job, the
+        cancel check between steps, the hourly retention sweep and the API.
+        With the defaults (rollback journal, 5 s busy wait) concurrent writes
+        fail with "database is locked".
+
+          * WAL lets readers and one writer proceed together;
+          * busy_timeout makes a writer wait for the lock instead of failing;
+          * foreign_keys enforces ON DELETE CASCADE, which SQLite ignores
+            unless asked.
+        """
+        cur = dbapi_conn.cursor()
+        try:
+            cur.execute("PRAGMA busy_timeout=30000")
+            cur.execute("PRAGMA foreign_keys=ON")
+            if ":memory:" not in DATABASE_URL:
+                cur.execute("PRAGMA journal_mode=WAL")
+        finally:
+            cur.close()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def init_db():
     Base.metadata.create_all(bind=engine)
     _add_missing_columns()
+    _add_missing_indexes()
+
+
+def _add_missing_indexes():
+    """create_all() adds indexes only to tables it creates. Add the ones a
+    database made by an older build lacks. A database that already holds
+    rows the new unique index forbids keeps working without it (and says so)
+    rather than refusing to start."""
+    import logging
+    for table in Base.metadata.sorted_tables:
+        for index in table.indexes:
+            try:
+                index.create(bind=engine, checkfirst=True)
+            except Exception as exc:          # noqa: BLE001 -- startup must not die here
+                logging.getLogger(__name__).warning(
+                    "Could not add index %s (%s); existing rows conflict with it.",
+                    index.name, type(exc).__name__)
 
 
 # Columns added after someone may already have a database file. SQLAlchemy's

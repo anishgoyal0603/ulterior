@@ -85,6 +85,11 @@ lists what is no longer observed, still observed and new.
 - [ ] PostgreSQL with `sslmode=require` in `DATABASE_URL`.
 - [ ] `EVIDENCE_DIR` on a **persistent** volume (otherwise a redeploy deletes the
       screenshots and Verify evidence reports *Incomplete*).
+- [ ] The container runs as the unprivileged `pwuser`, not root. If the host
+      mounts the evidence volume as root-owned (Railway does), the first audit
+      fails with "Permission denied" on the screenshot folder. On Railway set
+      `RAILWAY_RUN_UID=0` for that service only if you cannot change the
+      volume's owner, and know that it runs the crawler as root again.
 - [ ] `API_KEYS` with organisation keys; `ADMIN_API_KEYS` set explicitly
       (production refuses to start without it).
 - [ ] `PUBLIC_BASE_URL` = this deployment's public https address (production

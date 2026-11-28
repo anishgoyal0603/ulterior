@@ -17,6 +17,8 @@ venv/
 
 # ---- Local database & generated artifacts ----
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 

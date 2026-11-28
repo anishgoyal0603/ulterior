@@ -40,6 +40,10 @@ class CheckboxState:
     # makes DP-04 (Forced Action) provable rather than a judgement call: the
     # page itself declares that the user cannot proceed without ticking it.
     required: bool = False
+    # The radio group (the input's `name`). DP-02 needs it: a default in a
+    # required choice is only basket sneaking when the same group offers an
+    # explicit "no" that the shop did not select.
+    group: str = ""
 
 
 @dataclass
@@ -149,6 +153,10 @@ URGENCY_PATTERNS = [
     r"expect \d.*(weeks|days).*arrive",
     r"low(\s+in)? stock", r"limited stock",
     r"reserved for \d+", r"sale ends? (once|when)",
+    # Deadline wording with a clock. Without these a "Deal ends in 00:04:59"
+    # banner was never seen as urgency at all, so DP-01 could not test it --
+    # and _DEADLINE_PATTERNS below already treats these words as deadlines.
+    r"(deal|sale|offer) ends? in", r"\bends in\s*:?\s*\d", r"\bexpires in\b",
     r"few (left|remaining)",
     # NOTE: a bare "in stock" is deliberately NOT here. It is the plain,
     # honest way to state availability -- "In stock: 42 units" -- and listing
@@ -784,6 +792,7 @@ def extract_page_state(page, step_name: str, price_selector_override: str = None
             id=cb_id, label_text=label_text.strip(),
             checked=checked, is_prechecked=checked,
             input_type=input_type, required=required,
+            group=(el.get_attribute("name") or "") if input_type == "radio" else "",
         ))
 
     # --- buttons: geometry + contrast (Layer 2 raw material) ---

@@ -301,7 +301,10 @@ def test_both_walkers_install_the_navigation_guard():
         src = (Path(__file__).parent.parent / "capture" / name).read_text(encoding="utf-8")
         assert "new_guarded_page" in src, name
     browser = (Path(__file__).parent.parent / "capture" / "browser.py").read_text(encoding="utf-8")
-    assert "install_navigation_guard(page" in browser
+    # Installed on the browser CONTEXT, so popups (window.open) are guarded
+    # too, with service workers blocked.
+    assert "install_navigation_guard(context" in browser
+    assert 'service_workers="block"' in browser
 
 
 # --- Evidence isolation ----------------------------------------------------

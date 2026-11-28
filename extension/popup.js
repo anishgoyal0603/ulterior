@@ -158,7 +158,21 @@
 
   function render(results) {
     current = results;
-    $("report-preview").hidden = true;
+    // The popup re-renders whenever the page's results change. A report
+    // preview the person is reading stays open; if what would be sent has
+    // changed, the preview shows the new version (what is sent is always
+    // what is shown).
+    if (!$("report-preview").hidden) {
+      if (!results) {
+        $("report-preview").hidden = true;
+      } else {
+        const next = JSON.stringify(C.buildReportPayload(results), null, 2);
+        if (next !== $("report-json").textContent) {
+          $("report-json").textContent = next;
+          $("report-status").textContent = "The page changed, so this preview was updated.";
+        }
+      }
+    }
     if (!results) {
       $("results").hidden = true;
       $("not-scanned").hidden = false;

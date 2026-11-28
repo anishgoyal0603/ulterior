@@ -237,16 +237,16 @@ Stop the server first (**Ctrl+C**), then:
 Expect:
 
 ```
-407 passed, 90 deselected, 1 warning
+432 passed, 91 deselected, 1 warning
 ```
 
 ### Reading that line
 
-**`90 deselected` is not a problem, and there is nothing to remove.** It is
+**`91 deselected` is not a problem, and there is nothing to remove.** It is
 that command doing exactly what you asked. `-m "not ui"` means *skip the tests
-marked `ui`* — the 90 browser tests that launch a real server and drive a real
+marked `ui`* — the 91 browser tests that launch a real server and drive a real
 Chromium window. pytest is reporting how many it set aside on your
-instruction. Drop the flag and all 497 run.
+instruction. Drop the flag and all 523 run.
 
 **`1 warning` is also fine.** It comes from inside Starlette's own code, not
 this project. Ours are at zero and a test keeps them there.

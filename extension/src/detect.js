@@ -350,7 +350,10 @@
       "input[type=checkbox], input[type=radio], [role=checkbox], [role=radio], [role=switch]");
   }
 
-  const DECLINE_CHOICE_RE = /\b(no|don'?t|do not|skip|without|not\s+(now|required|needed)|i'?ll\s+take|none)\b/i;
+  const DECLINE_CHOICE_RE = /\b(no|don'?t|do not|skip|without|not\s+(now|required|needed)|i'?ll\s+take|none|free)\b/i;
+  // Paying for ONE purchase in instalments is not a subscription
+  // (kept in step with EMI_RE in detectors/vocab.py).
+  const EMI_RE = /\b(emi|emis|instal+ments?|pay\s*later|no[\s-]cost)\b/i;
 
   function groupHasDecline(input) {
     const name = input.getAttribute("name");
@@ -376,7 +379,16 @@
       const amounts = C.parseAmounts(label).filter((a) => a.value > 0);
       const isRadio = el.type === "radio" || el.getAttribute("role") === "radio";
 
-      if (C.RECURRING_BILLING_PATTERNS.some((p) => p.test(label)) && amounts.length) {
+      // Preferences and benefits first, whatever their wording: a wallet
+      // balance or "notify me" is never a charge, recurring or not.
+      if (C.BENEFIT_RE.test(label)) return;
+      // A radio is one of a REQUIRED choice. Its default is only the shop's
+      // choice made for you when the group offers an explicit "no" or a free
+      // option -- not when it picks between Monthly and Annual, or between
+      // two ways to pay.
+      if (isRadio && !groupHasDecline(el)) return;
+      const recurring = C.RECURRING_BILLING_PATTERNS.some((p) => p.test(label)) && !EMI_RE.test(label);
+      if (recurring && amounts.length) {
         findings.push({
           code: "DP-12", tier: "provable",
           title: "A repeating charge was already selected for you",
@@ -385,9 +397,7 @@
         });
         return;
       }
-      if (C.BENEFIT_RE.test(label)) return;
       if (!(C.PAID_ADDON_RE.test(label) || amounts.length)) return;
-      if (isRadio && !groupHasDecline(el)) return;
       const ev = { add_on: C.clip(C.redact(label), 110), state: "selected when the page loaded, before you touched it" };
       if (amounts.length) ev.price = C.formatINR(amounts[0].value);
       findings.push({
@@ -551,14 +561,21 @@
 
   /** The smallest element whose text matches -- its own words, not a run of
    *  neighbouring text glued together by innerText. */
-  function smallestMatchingElement(re) {
-    let best = null;
+  /** Every visible short element whose text matches, those inside a pop-up
+   *  first, then shortest first. Checking only the single shortest match on
+   *  the page let an innocent short line ("Battery is damaged?" in a repair
+   *  FAQ) hide a real scare pop-up elsewhere. */
+  function matchingElements(re, limit = 25) {
+    const boxes = dialogs().map((d) => d.el);
+    const inDialog = (el) => boxes.some((b) => b.contains(el));
+    const out = [];
     for (const el of document.querySelectorAll("p, span, div, b, strong, li, small, em, h1, h2, h3, h4, label")) {
       const f = fast(el);
       if (!f || f.length > 200 || !re.test(f) || !isVisible(el)) continue;
-      if (!best || f.length < best.len) best = { el, len: f.length };
+      out.push({ el, len: f.length, dialog: inDialog(el) });
     }
-    return best ? best.el : null;
+    out.sort((a, b) => (b.dialog - a.dialog) || (a.len - b.len));
+    return out.slice(0, limit).map((x) => x.el);
   }
 
   function smallestMatching(re) {
@@ -786,18 +803,20 @@
     // pop-up or card), not merely somewhere on the page: an article that
     // mentions "virus detected" plus any Download button elsewhere is not
     // a rogue alert.
-    const scareEl = smallestMatchingElement(C.SCARE_RE);
-    if (!scareEl) return [];
-    let box = scareEl, ctas = [], exe = null;
-    for (let i = 0; box && box !== document.body && i < 4; i++, box = box.parentElement) {
-      ctas = [...box.querySelectorAll(CLICKABLE)].filter((el) => {
-        const f = fast(el);
-        return f && f.length <= 40 && C.SCARE_CTA_RE.test(f) && isVisible(el);
-      });
-      exe = [...box.querySelectorAll("a[href]")].find((a) => C.EXECUTABLE_RE.test(a.getAttribute("href") || ""));
-      if (ctas.length || exe) break;
+    let scareEl = null, ctas = [], exe = null;
+    for (const cand of matchingElements(C.SCARE_RE)) {
+      let box = cand;
+      for (let i = 0; box && box !== document.body && i < 4; i++, box = box.parentElement) {
+        ctas = [...box.querySelectorAll(CLICKABLE)].filter((el) => {
+          const f = fast(el);
+          return f && f.length <= 40 && C.SCARE_CTA_RE.test(f) && isVisible(el);
+        });
+        exe = [...box.querySelectorAll("a[href]")].find((a) => C.EXECUTABLE_RE.test(a.getAttribute("href") || ""));
+        if (ctas.length || exe) break;
+      }
+      if (ctas.length || exe) { scareEl = cand; break; }
     }
-    if (!ctas.length && !exe) return [];
+    if (!scareEl) return [];
     const ev = { warning_text: C.clip(C.redact(textOf(scareEl)), 100),
                  action_offered: ctas.length ? C.clip(clickableText(ctas[0]), 40) : "a download link" };
     if (exe) ev.executable_link = C.clip((exe.getAttribute("href") || "").split("?")[0].split("/").pop(), 60);

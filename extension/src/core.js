@@ -126,6 +126,7 @@
     /high[\s-]?demand/i, /in high demand/i,
     /\d+\s+claimed/i, /low(\s+in)? stock/i, /limited stock/i,
     /reserved for \d+/i, /sale ends? (once|when|in)/i,
+    /(deal|offer) ends? in/i, /\bends in\s*:?\s*\d/i, /\bexpires in\b/i,
     /\bfilling fast\b/i, /\balmost (gone|sold out|full)\b/i,
     // Hinglish
     /\bjaldi\s+(karein|karo|kare|kijiye)\b/i, /\bsirf\s+\d+\s+(bache|bacha|baki|baaki|left)\b/i,

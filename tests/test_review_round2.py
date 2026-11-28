@@ -116,7 +116,7 @@ def test_a_frozen_countdown_is_found_even_with_a_stock_count_on_the_page():
     a, b = _state("product", text, urgency=found), _state("product", text, urgency=found)
     trace = FunnelTrace(site_name="t", states=[a], reload_pairs={"product": (a, b)})
     v = detect_fake_urgency(trace)
-    assert v and v[0].evidence.get("kind", "countdown") == "countdown", [x.evidence for x in v]
+    assert v and v[0].evidence.get("claim_kind") == "countdown", [x.evidence for x in v]
 
 
 # ------------------------------------------------------------ DP-06 / DP-03 roles
