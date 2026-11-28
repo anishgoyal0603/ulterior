@@ -53,7 +53,7 @@ def test_xss_payload_survives_capture_so_rendering_must_escape():
 
 
 def test_dashboard_escapes_all_audit_derived_fields():
-    src = DASHBOARD_JS.read_text()
+    src = DASHBOARD_JS.read_text(encoding="utf-8")
     assert "function escapeHtml" in src, "dashboard must define an escaper"
 
     # Every interpolation of a violation/job field must be wrapped in
@@ -69,7 +69,7 @@ def test_dashboard_escapes_all_audit_derived_fields():
 
 
 def test_extension_popup_uses_no_innerhtml_for_untrusted_data():
-    src = POPUP_JS.read_text()
+    src = POPUP_JS.read_text(encoding="utf-8")
     code = "\n".join(
         line for line in src.splitlines()
         if not line.strip().startswith("*") and not line.strip().startswith("/*")
@@ -96,7 +96,7 @@ def test_no_raw_sql_in_any_query_path():
         if py.name == "db.py":
             continue
         scanned.append(py.name)
-        text = py.read_text()
+        text = py.read_text(encoding="utf-8")
         if (re.search(r"\bexec(ute|_driver_sql)\s*\(\s*[f\"']", text)
                 or re.search(r"text\s*\(\s*f[\"']", text)
                 or re.search(r"\.format\s*\(", text) and "ALTER" in text):
@@ -116,7 +116,7 @@ def test_schema_backfill_is_bounded_by_the_models():
     out of the metadata means the set of possible statements is fixed by the
     models at import time.
     """
-    source = (Path(__file__).parent.parent / "app" / "db.py").read_text()
+    source = (Path(__file__).parent.parent / "app" / "db.py").read_text(encoding="utf-8")
     assert "Base.metadata.sorted_tables" in source, (
         "the backfill must iterate the model metadata"
     )

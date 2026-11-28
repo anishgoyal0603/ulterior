@@ -56,7 +56,7 @@ def keyed_server(tmp_path_factory):
         except Exception:
             if proc.poll() is not None:
                 log_file.close()
-                pytest.fail("server died on startup:\n" + log_path.read_text(errors="replace")[-3000:])
+                pytest.fail("server died on startup:\n" + log_path.read_text(encoding="utf-8", errors="replace")[-3000:])
             time.sleep(0.5)
     yield base
     _stop_server(proc)

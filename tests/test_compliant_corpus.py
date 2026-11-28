@@ -147,7 +147,7 @@ def test_the_corpus_actually_exercises_the_detectors(tmp_path):
     fee -- so a pass means the detectors looked and declined, not that there
     was nothing to look at.
     """
-    text = " ".join((CORPUS / f).read_text().lower()
+    text = " ".join((CORPUS / f).read_text(encoding="utf-8").lower()
                     for f in sorted(p.name for p in CORPUS.glob("*.html")))
     for bait in ("hurry", "in stock", "subscribe", "privacy policy",
                  "promotions", "sponsored", "delivery", "renews automatically",

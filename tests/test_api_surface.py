@@ -250,7 +250,7 @@ def test_evidence_directory_is_not_a_hardcoded_posix_path():
     # would be wrong — what matters is that it is DERIVED, not written down.
     assert DEFAULT_EVIDENCE_DIR.startswith(tempfile.gettempdir())
 
-    source = (Path(__file__).parent.parent / "capture" / "funnel_walker.py").read_text()
+    source = (Path(__file__).parent.parent / "capture" / "funnel_walker.py").read_text(encoding="utf-8")
     code = "\n".join(
         line for line in source.splitlines() if not line.lstrip().startswith("#")
     )
@@ -274,7 +274,7 @@ def test_requirements_contain_no_unimported_packages():
     # these were removed, and naming them there must not trip this test.
     requirements = "\n".join(
         line.split("#")[0].strip().lower()
-        for line in (root / "requirements.txt").read_text().splitlines()
+        for line in (root / "requirements.txt").read_text(encoding="utf-8").splitlines()
         if line.strip() and not line.strip().startswith("#")
     )
     for package in ("lxml", "beautifulsoup4", "celery", "redis", "psycopg2"):
@@ -301,8 +301,8 @@ def test_both_launchers_guard_the_python_version():
     """Failing at 'Microsoft Visual C++ 14.0 or greater is required', 200 lines
     into a compiler log, is a terrible way to learn your Python is too new."""
     root = Path(__file__).parent.parent
-    assert "not supported" in (root / "run_demo.ps1").read_text()
-    assert "not supported" in (root / "run_demo.sh").read_text()
+    assert "not supported" in (root / "run_demo.ps1").read_text(encoding="utf-8")
+    assert "not supported" in (root / "run_demo.sh").read_text(encoding="utf-8")
 
 
 def test_launchers_prefer_an_existing_venv_over_the_system_python():
@@ -314,12 +314,12 @@ def test_launchers_prefer_an_existing_venv_over_the_system_python():
     """
     root = Path(__file__).parent.parent
 
-    ps1 = (root / "run_demo.ps1").read_text()
+    ps1 = (root / "run_demo.ps1").read_text(encoding="utf-8")
     assert ps1.index("Test-Path $VPy") < ps1.index("No supported Python was found"), (
         "run_demo.ps1 bails on the system Python before checking for a usable .venv"
     )
 
-    sh = (root / "run_demo.sh").read_text()
+    sh = (root / "run_demo.sh").read_text(encoding="utf-8")
     assert sh.index('if [ -x "$VPY" ]') < sh.index("No supported Python found"), (
         "run_demo.sh bails on the system Python before checking for a usable .venv"
     )
@@ -328,10 +328,10 @@ def test_launchers_prefer_an_existing_venv_over_the_system_python():
 def test_launchers_ask_for_supported_python_versions_by_name():
     """Having 3.14 installed alongside 3.12 must select 3.12. A bare `py -3`
     or `python3` picks the newest, which is the one that does not work."""
-    ps1 = (Path(__file__).parent.parent / "run_demo.ps1").read_text()
+    ps1 = (Path(__file__).parent.parent / "run_demo.ps1").read_text(encoding="utf-8")
     assert "$PreferredMinors = @(12, 13, 11, 10)" in ps1
 
-    sh = (Path(__file__).parent.parent / "run_demo.sh").read_text()
+    sh = (Path(__file__).parent.parent / "run_demo.sh").read_text(encoding="utf-8")
     assert "python3.12 python3.13 python3.11 python3.10" in sh
 
 
@@ -346,7 +346,7 @@ def _code_lines(path):
     import io
     import tokenize
 
-    source = path.read_text()
+    source = path.read_text(encoding="utf-8")
     lines = source.splitlines()
     blanked = list(lines)
     try:
@@ -398,11 +398,11 @@ def test_the_setup_path_installs_the_test_only_dependencies_too():
     """
     root = Path(__file__).parent.parent
     for launcher in ("run_demo.ps1", "run_demo.sh"):
-        assert "requirements-dev.txt" in (root / launcher).read_text(), (
+        assert "requirements-dev.txt" in (root / launcher).read_text(encoding="utf-8"), (
             f"{launcher} does not install requirements-dev.txt, so the report-"
             f"wording tests will skip on every machine set up with it"
         )
-    ci = (root / ".github" / "workflows" / "ci.yml").read_text()
+    ci = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "requirements-dev.txt" in ci, "CI stopped installing the test deps"
 
 
@@ -415,7 +415,7 @@ def test_launchers_give_pip_enough_time_on_a_slow_connection():
     """
     root = Path(__file__).parent.parent
     for name in ("run_demo.sh", "run_demo.ps1"):
-        text = (root / name).read_text()
+        text = (root / name).read_text(encoding="utf-8")
         assert "--timeout" in text and "120" in text, (
             f"{name} leaves pip on its 15-second default timeout"
         )
@@ -443,8 +443,8 @@ def test_the_server_reports_missing_demo_assets_instead_of_rendering_wrong(tmp_p
 
     empty = tmp_path / "demo"
     empty.mkdir()
-    (empty / "index.html").write_text("x")
-    (empty / "demo.css").write_text("")          # the interrupted-copy case
+    (empty / "index.html").write_text("x", encoding="utf-8")
+    (empty / "demo.css").write_text("", encoding="utf-8")          # the interrupted-copy case
     monkeypatch.setitem(main._REQUIRED_ASSETS, "demo",
                         (str(empty), ("index.html", "demo.css", "demo.js")))
     reported = main.missing_static_assets()
@@ -491,7 +491,7 @@ def test_every_user_facing_surface_credits_the_team(client):
 def test_the_extension_carries_the_same_name():
     root = Path(__file__).parent.parent
     import json as _json
-    manifest = _json.loads((root / "extension" / "manifest.json").read_text())
+    manifest = _json.loads((root / "extension" / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["name"] == "Ulterior by The Odyssey", manifest["name"]
 
 

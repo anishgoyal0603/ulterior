@@ -347,15 +347,23 @@ def test_dashboard_has_stop_coverage_and_review_controls(orgs):
     assert "/cancel" in js and "/review" in js and "renderCoverage" in js
 
 
-def test_audits_started_together_all_finish_under_uvloop():
+def test_audits_started_together_all_finish():
     """uvicorn runs on uvloop on Linux. Two threads starting Playwright at the
     same moment used to fail one audit with "Racing with another loop to
-    spawn a process"; starts are now serialised in capture/browser.py."""
-    uvloop = pytest.importorskip("uvloop")
+    spawn a process"; starts are now serialised in capture/browser.py.
+
+    uvloop does not exist on Windows, and this used to be SKIPPED there -- a
+    skipped test proves nothing. Without uvloop it still runs, on the normal
+    event loop, so three audits started together must still all finish."""
     import asyncio
     from app.tasks import recover_jobs
+    try:
+        import uvloop
+    except ImportError:
+        uvloop = None
     old_policy = asyncio.get_event_loop_policy()
-    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    if uvloop is not None:
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
     try:
         ids = [_pending(org="together") for _ in range(3)]
         recover_jobs()

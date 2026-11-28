@@ -110,7 +110,7 @@ def server(tmp_path_factory):
 
     def server_log() -> str:
         log_file.flush()
-        return log_path.read_text(errors="replace")[-3000:]
+        return log_path.read_text(encoding="utf-8", errors="replace")[-3000:]
 
     base = f"http://127.0.0.1:{port}"
     for _ in range(120):

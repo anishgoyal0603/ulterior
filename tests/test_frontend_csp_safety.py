@@ -34,7 +34,7 @@ PAGES = [
 
 @pytest.mark.parametrize("page,assets", PAGES)
 def test_page_has_no_inline_style_or_script_block(page, assets):
-    html = (ROOT / page).read_text()
+    html = (ROOT / page).read_text(encoding="utf-8")
     assert "<style>" not in html, (
         f"{page} has an inline <style> block. A viewer with style-src 'self' "
         f"will drop it and the page will render as unstyled Times New Roman."
@@ -49,7 +49,7 @@ def test_page_has_no_inline_style_or_script_block(page, assets):
 def test_page_has_no_inline_style_attributes(page, assets):
     """style="..." is blocked by the same directive as a <style> block, and it
     cannot be rescued by a hash. Utility classes in the stylesheet instead."""
-    html = (ROOT / page).read_text()
+    html = (ROOT / page).read_text(encoding="utf-8")
     offenders = re.findall(r'style="[^"]*"', html)
     assert offenders == [], (
         f"{page} carries {len(offenders)} inline style attribute(s): {offenders[:3]}"
@@ -59,7 +59,7 @@ def test_page_has_no_inline_style_attributes(page, assets):
 @pytest.mark.parametrize("page,assets", PAGES)
 def test_page_has_no_inline_event_handlers(page, assets):
     """onclick="..." is inline script by another name, blocked the same way."""
-    html = (ROOT / page).read_text()
+    html = (ROOT / page).read_text(encoding="utf-8")
     handlers = re.findall(r'\son[a-z]+="[^"]*"', html)
     assert handlers == [], f"{page} has inline handlers: {handlers[:3]}"
 
@@ -68,20 +68,20 @@ def test_page_has_no_inline_event_handlers(page, assets):
 def test_referenced_assets_exist_and_are_not_empty(page, assets):
     """Extracting the blocks is only a fix if the files actually got written --
     an empty or missing stylesheet renders exactly like a blocked inline one."""
-    html = (ROOT / page).read_text()
+    html = (ROOT / page).read_text(encoding="utf-8")
     folder = (ROOT / page).parent
     for asset in assets:
         assert asset in html, f"{page} does not reference {asset}"
         path = folder / asset
         assert path.exists(), f"{page} references {asset}, which does not exist"
-        assert len(path.read_text().strip()) > 200, f"{asset} is suspiciously empty"
+        assert len(path.read_text(encoding="utf-8").strip()) > 200, f"{asset} is suspiciously empty"
 
 
 def test_dashboard_utility_classes_are_all_defined():
     """The inline style attributes became .u1../.uN classes. A class used in the
     markup but missing from the stylesheet would silently lose that styling."""
-    html = (ROOT / "dashboard/index.html").read_text()
-    css = (ROOT / "dashboard/dashboard.css").read_text()
+    html = (ROOT / "dashboard/index.html").read_text(encoding="utf-8")
+    css = (ROOT / "dashboard/dashboard.css").read_text(encoding="utf-8")
     used = set(re.findall(r"\bu\d+\b", html))
     assert used, "no utility classes found -- has the extraction been undone?"
     for cls in sorted(used):
@@ -93,7 +93,7 @@ def test_external_scripts_are_deferred_not_racing_the_dom():
     the time they ran. As external files they need `defer` to keep that
     guarantee -- without it they can run before the elements they query exist."""
     for page, _ in PAGES:
-        html = (ROOT / page).read_text()
+        html = (ROOT / page).read_text(encoding="utf-8")
         for tag in re.findall(r"<script[^>]*src=[^>]*>", html):
             assert "defer" in tag or "async" in tag or "module" in tag, (
                 f"{page}: {tag} may run before the DOM it queries exists"
@@ -108,7 +108,7 @@ def test_the_scripts_do_not_generate_inline_styles_either(script):
     the sweep of the markup. They fail the same two ways: a viewer whose CSP
     forbids inline styles drops them, and a hardcoded light-mode grey is
     nearly invisible on the dark surface."""
-    text = (ROOT / script).read_text()
+    text = (ROOT / script).read_text(encoding="utf-8")
     code = "\n".join(line for line in text.splitlines()
                      if not line.strip().startswith(("//", "*", "/*")))
     assert 'style="' not in code, f"{script} generates an inline style attribute"
@@ -123,10 +123,10 @@ def test_no_page_asks_for_a_web_font_the_csp_would_block():
     one machine that matters. The design uses system faces on purpose."""
     for page, assets in PAGES:
         folder = (ROOT / page).parent
-        html = (ROOT / page).read_text()
+        html = (ROOT / page).read_text(encoding="utf-8")
         assert "fonts.googleapis" not in html and "fonts.gstatic" not in html, page
         for asset in assets:
             if asset.endswith(".css"):
-                css = (folder / asset).read_text()
+                css = (folder / asset).read_text(encoding="utf-8")
                 assert "@font-face" not in css, f"{asset} declares a web font"
                 assert "@import" not in css, f"{asset} imports another stylesheet"

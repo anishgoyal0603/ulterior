@@ -352,7 +352,7 @@ def main():
             print(f"    {r['name'][:42]:44} {verdict}")
 
     if args.json:
-        Path(args.json).write_text(json.dumps(results, indent=2))
+        Path(args.json).write_text(json.dumps(results, indent=2), encoding="utf-8")
         print(f"\n  Written to {args.json}")
 
 

@@ -76,7 +76,7 @@ def test_a_forbidden_control_is_refused_and_recorded_not_silently_skipped(tmp_pa
         "<html><body><h1>Checkout</h1>"
         "<button>Place Order</button>"
         "</body></html>"
-    )
+    , encoding="utf-8")
     trace = walk_discovered_funnel("file://" + str(page), screenshot_dir=str(tmp_path / "shots"))
     notes = " ".join(trace.discovery["notes"]).lower()
     assert "refused to click" in notes
@@ -122,7 +122,7 @@ def test_says_so_plainly_when_only_one_page_could_be_examined(tmp_path):
     findings' without saying only one page was seen would read as a clean
     bill of health for a site that was never actually examined."""
     page = tmp_path / "wall.html"
-    page.write_text("<html><body><h1>Access denied</h1></body></html>")
+    page.write_text("<html><body><h1>Access denied</h1></body></html>", encoding="utf-8")
     trace = walk_discovered_funnel("file://" + str(page), screenshot_dir=str(tmp_path / "s"))
     assert len(trace.states) == 1
     notes = " ".join(trace.discovery["notes"]).lower()

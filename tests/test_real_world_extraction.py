@@ -504,12 +504,12 @@ def test_drip_pricing_is_caught_with_no_machine_readable_data(tmp_path):
     dark = Path(__file__).parent.parent / "fixtures" / "ecommerce_dark"
     stripped = tmp_path / "stripped"
     stripped.mkdir()
-    (stripped / "shop.css").write_text((dark / "shop.css").read_text())
+    (stripped / "shop.css").write_text((dark / "shop.css").read_text(encoding="utf-8"), encoding="utf-8")
     for name in ("listing.html", "cart.html", "checkout.html"):
-        text = (dark / name).read_text()
+        text = (dark / name).read_text(encoding="utf-8")
         text = re.sub(r'\s+data-(price|name|total|subtotal)="[^"]*"', "", text)
         text = re.sub(r'<script type="application/ld\+json">.*?</script>', "", text, flags=re.S)
-        (stripped / name).write_text(text)
+        (stripped / name).write_text(text, encoding="utf-8")
 
     adapter = SiteAdapter(
         site_name="ShopMart, stripped of machine-readable data",

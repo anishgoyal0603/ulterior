@@ -296,3 +296,21 @@ def test_the_audit_script_redacts_what_it_prints():
 def test_the_report_ships_a_rupee_capable_font():
     assert (ROOT / "report" / "fonts" / "DejaVuSans.ttf").is_file()
     assert (ROOT / "report" / "fonts" / "DejaVuSans-Bold.ttf").is_file()
+
+
+# ------------------------------------------------------------ Windows encoding
+
+def test_source_files_are_always_read_as_utf8():
+    """Windows reads text files as cp1252 unless told otherwise, and the source
+    contains rupee signs, curly quotes and Hindi. One `read_text()` without an
+    encoding failed on Windows only ('charmap' codec can't decode byte 0x8d)."""
+    import ast
+    bad = []
+    for folder in ("tests", "app", "capture", "detectors", "report", "scripts"):
+        for f in (ROOT / folder).rglob("*.py"):
+            for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                        and node.func.attr in ("read_text", "write_text")
+                        and not any(k.arg == "encoding" for k in node.keywords)):
+                    bad.append(f"{f.relative_to(ROOT)}:{node.lineno}")
+    assert not bad, bad

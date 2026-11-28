@@ -132,7 +132,7 @@ def test_every_contrast_measurement_resolves_a_painted_background():
     """The button and disclosure-label extractors read backgroundColor
     directly while the link extractor walked ancestors for a painted one.
     They must all use the same lookup."""
-    source = (Path(__file__).parent.parent / "capture" / "state_extractor.py").read_text()
+    source = (Path(__file__).parent.parent / "capture" / "state_extractor.py").read_text(encoding="utf-8")
     assert source.count("_BG_WALK_JS") >= 4, "not every extractor uses the ancestor walk"
     assert 'evaluate("el => getComputedStyle(el).backgroundColor")' not in source
 
@@ -298,9 +298,9 @@ def test_the_navigation_guard_refuses_file_urls_unless_asked():
 def test_both_walkers_install_the_navigation_guard():
     """A guard that only one code path uses protects only one code path."""
     for name in ("funnel_walker.py", "funnel_discovery.py", "inspect_site.py"):
-        src = (Path(__file__).parent.parent / "capture" / name).read_text()
+        src = (Path(__file__).parent.parent / "capture" / name).read_text(encoding="utf-8")
         assert "new_guarded_page" in src, name
-    browser = (Path(__file__).parent.parent / "capture" / "browser.py").read_text()
+    browser = (Path(__file__).parent.parent / "capture" / "browser.py").read_text(encoding="utf-8")
     assert "install_navigation_guard(page" in browser
 
 
@@ -311,7 +311,7 @@ def test_screenshots_are_written_per_job():
     names are fixed literals -- so every discovery audit ever run wrote to the
     same five files. Job 1's stored evidence path then showed job 2's
     screenshots, and deleting job 2 removed the file job 1 pointed at."""
-    src = (Path(__file__).parent.parent / "app" / "tasks.py").read_text()
+    src = (Path(__file__).parent.parent / "app" / "tasks.py").read_text(encoding="utf-8")
     assert 'f"job_{job_id}"' in src, "evidence directory is not scoped to the job"
     assert "screenshot_dir=evidence_dir" in src
 
@@ -320,7 +320,7 @@ def test_discovery_notes_are_redacted_before_storage():
     """The notes quote button text straight off the audited page. Every other
     captured string is redacted; this one was not, so a logged-in checkout
     leaked a name and phone number into the database and back out of the API."""
-    src = (Path(__file__).parent.parent / "app" / "tasks.py").read_text()
+    src = (Path(__file__).parent.parent / "app" / "tasks.py").read_text(encoding="utf-8")
     assert "redact_list(safe_discovery[field])" in src
 
 
@@ -328,7 +328,7 @@ def test_a_failed_job_rolls_back_before_recording_the_failure():
     """If the exception came from the commit, the session is dead and every
     later statement raises PendingRollbackError -- including the ones
     recording the failure. The job then sat at "running" forever."""
-    src = (Path(__file__).parent.parent / "app" / "tasks.py").read_text()
+    src = (Path(__file__).parent.parent / "app" / "tasks.py").read_text(encoding="utf-8")
     failure_block = src.split("except Exception as e:")[1]
     assert "db.rollback()" in failure_block
     assert failure_block.index("db.rollback()") < failure_block.index('job.status = "failed"')
@@ -400,7 +400,7 @@ def test_retention_runs_while_the_server_is_up_not_only_at_boot():
     """purge_expired() was called once in the startup hook and nowhere else,
     so RETENTION_DAYS and MAX_STORED_AUDITS bounded nothing on a server that
     stays running -- the only kind of server a retention policy is for."""
-    src = (Path(__file__).parent.parent / "app" / "main.py").read_text()
+    src = (Path(__file__).parent.parent / "app" / "main.py").read_text(encoding="utf-8")
     assert "_retention_loop" in src
     assert "daemon=True" in src
     assert hasattr(config, "RETENTION_SWEEP_SECONDS")
@@ -413,14 +413,14 @@ def test_the_dashboard_names_a_rate_limit_instead_of_crashing_on_it():
     else. A 429 is valid JSON, so it sailed through as an object and the
     caller crashed doing .slice() on it -- the user saw "Could not load",
     which says nothing about waiting a minute."""
-    js = (Path(__file__).parent.parent / "dashboard" / "dashboard.js").read_text()
+    js = (Path(__file__).parent.parent / "dashboard" / "dashboard.js").read_text(encoding="utf-8")
     assert "r.status === 429" in js
     assert "Too many requests" in js
     assert "if (r.ok)" in js, "success and failure must be separated before parsing"
 
 
 def test_the_demo_page_handles_a_rate_limit_and_a_lost_server():
-    js = (Path(__file__).parent.parent / "demo" / "demo.js").read_text()
+    js = (Path(__file__).parent.parent / "demo" / "demo.js").read_text(encoding="utf-8")
     assert "429" in js
     assert "pollResponse.ok" in js, "a failed poll must stop the loop, not parse an error page"
 
@@ -429,7 +429,7 @@ def test_the_connection_banner_is_readable_in_dark_mode():
     """It set its own colours with style.cssText -- hardcoded light-mode
     values. The one banner whose entire job is to be seen when the app cannot
     reach its API rendered as near-black on near-black."""
-    js = (Path(__file__).parent.parent / "dashboard" / "dashboard.js").read_text()
+    js = (Path(__file__).parent.parent / "dashboard" / "dashboard.js").read_text(encoding="utf-8")
     assert "style.cssText" not in js
-    css = (Path(__file__).parent.parent / "dashboard" / "dashboard.css").read_text()
+    css = (Path(__file__).parent.parent / "dashboard" / "dashboard.css").read_text(encoding="utf-8")
     assert ".conn-error" in css
