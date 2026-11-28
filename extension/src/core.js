@@ -200,7 +200,18 @@
    *  "Delivery charges: FREE" say the opposite, and used to count as a
    *  disclosure -- which switched DP-08 off for the checkout that then added
    *  fees. Negated and inclusive mentions are removed before the test. */
-  const NEGATED_CHARGE_RE = /\b(no|zero|free|without|waived|nil|incl\.?|including|inclusive(\s+of)?|includes?)(\s+(all|any|hidden|extra|additional|delivery|shipping|convenience|platform|booking|service|handling|other))*\s+(fees?|charges?)\b|\b(fees?|charges?)\s*[:\-–]?\s*(free|nil|waived|₹\s*0(?![\d.,])|0(?![\d.,]))/gi;
+  const NEGATED_CHARGE_RE = new RegExp([
+    // "No hidden fees", "Zero delivery charges", "Inclusive of all fees"
+    "\\b(no|zero|free|without|waived|nil|incl\\.?|including|inclusive(\\s+of)?|includes?)(\\s+(all|any|hidden|extra|additional|delivery|shipping|convenience|platform|booking|service|handling|other))*\\s+(fees?|charges?)\\b",
+    // "Inclusive of all taxes and fees"
+    "\\binclusive\\s+of[^.;\\n]{0,40}\\b(fees?|charges?)\\b",
+    // "All fees included", "Delivery charges are included"
+    "\\b(fees?|charges?)\\s+(are\\s+)?(included|inclusive|waived)\\b",
+    // "Delivery charges: FREE", "Fee ₹0"
+    "\\b(fees?|charges?)\\s*[:\\-–]?\\s*(free|nil|waived|₹\\s*0(?![\\d.,])|0(?![\\d.,]))",
+    // "₹0 delivery fee"
+    "(₹|rs\\.?|inr)\\s*0(?![\\d.,])\\s+(\\w+\\s+)?(fees?|charges?)\\b",
+  ].join("|"), "gi");
   const DISCLOSES_CHARGES_RE = /\b(fees?|charges?|excl\.?|exclusive\s+of|plus\s+taxes)\b|\+\s*(₹|rs\.?\s*\d)/i;
   function disclosesCharges(text) {
     return DISCLOSES_CHARGES_RE.test(String(text || "").replace(NEGATED_CHARGE_RE, " "));

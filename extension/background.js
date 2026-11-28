@@ -178,13 +178,15 @@ async function communityHistory(key) {
 
 const communityInFlight = new Set();
 async function communityPut(key, price) {
-  if (!(await communityOn())) return;
   const k = "cp:" + key;
+  // Claimed BEFORE the first await: two messages for the same product
+  // arriving together both passed a check made after it.
   if (communityInFlight.has(k)) return;
-  const last = (await ext.storage.session.get(k))[k];
-  if (last && last.price === price && Date.now() - last.at < 6 * 3600 * 1000) return;   // once per 6 h per price
   communityInFlight.add(k);
   try {
+    if (!(await communityOn())) return;
+    const last = (await ext.storage.session.get(k))[k];
+    if (last && last.price === price && Date.now() - last.at < 6 * 3600 * 1000) return;   // once per 6 h per price
     await communityFetch(C.COMMUNITY_PATHS.put, { observations: [{ key, price }] });
     // Remembered only once the server has it: marking it sent BEFORE the
     // request meant a cold start or a 502 lost the reading for six hours.

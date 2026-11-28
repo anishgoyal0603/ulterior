@@ -175,6 +175,22 @@ def test_drip_pricing_is_caught_across_a_flight_booking(ctx, fresh, site):
     assert page.errors == []
 
 
+def test_two_adults_and_a_one_line_order_total_are_read(ctx, fresh, site):
+    """"Base fare for 2 Adults" is the passenger count ("for" used to be
+    ignored), and "Order Total: ₹9,548" in ONE element is the total (the
+    threshold filter used to erase it because it starts with "Order")."""
+    page = fresh
+    page.goto(f"{site}/travel/results2.html")
+    page.wait_for_timeout(700)
+    page.click("#pick")                                    # ₹4,599 per person
+    page.wait_for_url("**/review2.html")
+    r = results_for(ctx, "review2.html", want=lambda r: "DP-08" in codes(r))
+    drip = next(f for f in r["findings"] if f["code"] == "DP-08")
+    assert "₹4,599 x 2" in drip["title"] and "₹9,548" in drip["title"], drip
+    assert "₹350 of the ₹350 difference" in drip["detail"], drip
+    assert "Convenience fee ₹350" in drip["detail"], drip
+
+
 def test_a_countdown_that_restarts_on_reload_is_caught(ctx, fresh, site):
     page = fresh
     page.goto(f"{site}/deal/fake-timer.html")

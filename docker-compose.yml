@@ -89,6 +89,12 @@ services:
       context: .
       dockerfile: Dockerfile
     command: python -m app.worker
+    # The image's HEALTHCHECK asks the web server for /healthz. A worker runs
+    # no web server, so it would be marked unhealthy after 40 s and could be
+    # restarted mid-audit by an orchestrator. Its health is the job
+    # heartbeat in the database (see docs/operations.md).
+    healthcheck:
+      disable: true
     environment:
       APP_ENV: ${APP_ENV:-production}
       DEBUG: "false"

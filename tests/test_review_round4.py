@@ -245,7 +245,8 @@ def test_evidence_is_deleted_only_after_the_commit(monkeypatch, tmp_path):
 def test_proxy_headers_follow_trust_proxy_headers():
     docker = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert '--forwarded-allow-ips="*"' not in docker
-    assert '"$TRUST_PROXY_HEADERS" = "true"' in docker and "--no-proxy-headers" in docker
+    assert "1|true|yes) export FORWARDED_ALLOW_IPS='*'; PROXY=--proxy-headers" in docker
+    assert "--no-proxy-headers" in docker
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     assert "pg_isready" in compose and "condition: service_healthy" in compose
     assert "/data/evidence && chown -R pwuser:pwuser" in docker

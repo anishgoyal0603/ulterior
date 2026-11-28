@@ -108,6 +108,9 @@ function setStatus(text, isError) {
 function setRunning(on) {
   $("progress").classList.toggle("on", on);
   $("run").disabled = on;
+  // The shop cannot change mid-run: the findings that come back belong to
+  // the shop the run started on, not the one picked since.
+  $("target").disabled = on;
 }
 
 async function runAudit() {

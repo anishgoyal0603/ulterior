@@ -142,6 +142,14 @@ async function authFetch(path, options) {
                             : "This dashboard needs an API key \u2014 enter it above.");
   }
   if (r.status === 429) {
+    // Two different 429s: the per-minute rate limit, and this workspace's
+    // limit on audits running at once. The server's own words say which.
+    let why = "";
+    try {
+      const body = await r.json();
+      if (body && typeof body.detail === "string") why = body.detail;
+    } catch (e) { /* not JSON */ }
+    if (why && !/^rate limit/i.test(why)) throw new Error(why);
     throw new Error("Too many requests \u2014 audits are limited to a few per "
                     + "minute. Wait a moment and try again.");
   }
@@ -453,6 +461,10 @@ function renderTrust(job, changed) {
   if (changed) {
     document.getElementById("trust-result").textContent = "";
     document.getElementById("baseline-id").value = "";
+    // A note typed for the previous audit must not be recorded on this one.
+    document.getElementById("review-note").value = "";
+    const outcome = document.getElementById("review-outcome");
+    outcome.selectedIndex = 0;
   }
   if (!done) return;
 
@@ -568,6 +580,10 @@ async function saveReview() {
       }),
     });
     renderReview(job);
+    // Keep the list's copy in step, or re-opening this audit from the list
+    // showed "Not yet reviewed" again.
+    const i = JOBS.findIndex((j) => j.id === job.id);
+    if (i >= 0) JOBS[i] = Object.assign({}, JOBS[i], job);
     out.textContent = "Review recorded. It is printed on the PDF report.";
   } catch (err) {
     out.textContent = "Could not record the review: " + err.message;

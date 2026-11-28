@@ -207,7 +207,10 @@
   // A condition inside a fee label is not the fee: "Delivery fee (Free above
   // ₹499)" next to "FREE", or "Small cart fee (orders under ₹199)" next to
   // "₹20". Reading the label first returned 499 and 199.
-  const THRESHOLD_CLAUSE_RE = /(\(|\b)(free\s+)?(above|over|under|below|upto|up\s*to|min(imum)?|orders?|on\s+orders?|less\s+than|more\s+than|till|until)\b[^)\n]{0,30}?(₹|rs\.?|inr)\s*[\d,]+(\.\d+)?\)?/gi;
+  // A COMPARATOR is required ("above", "under", "min"...). "Order" alone is
+  // not a condition: it is the first word of "Order Total ₹457" and "Order
+  // processing fee ₹49", and matching it erased the amount itself.
+  const THRESHOLD_CLAUSE_RE = /(\(|\b)(free\s+)?(?:(?:on\s+)?(?:orders?|cart|basket)\s+(?:value\s+)?)?(above|over|under|below|upto|up\s*to|min(imum)?|less\s+than|more\s+than|worth|till|until)\b[^)\n]{0,30}?(₹|rs\.?|inr)\s*[\d,]+(\.\d+)?\)?/gi;
 
   function amountForLabel(labelEl) {
     // The label's own amount ("Total ₹457"), unless it is only a condition.
@@ -330,7 +333,9 @@
       }
     }
     const body = textOf(scope).slice(0, 20000);
-    const NOT_BEFORE = /\b(only|just|up\s*to|upto|max(imum)?|min(imum)?|buy|for|over|under|above|below|at\s*least|any|get|of)\s*$/i;
+    // Not "for" or "of": "Base fare for 2 Adults" and "Price of 3 items" ARE
+    // the count. "for 2+ guests" / "for 3 or more" are caught by NOT_AFTER.
+    const NOT_BEFORE = /\b(only|just|up\s*to|upto|max(imum)?|min(imum)?|buy|over|under|above|below|at\s*least|any|get)\s*$/i;
     const NOT_AFTER = /^\s*(\+|or\s+more|left|remaining|available|in\s+stock|max|maximum)/i;
     const isCount = (m, re) => {
       const before = body.slice(Math.max(0, m.index - 16), m.index);
@@ -412,16 +417,20 @@
       const amounts = C.parseAmounts(label).filter((a) => a.value > 0);
       const isRadio = el.type === "radio" || el.getAttribute("role") === "radio";
 
-      // Preferences and benefits first, whatever their wording: a wallet
-      // balance or "notify me" is never a charge, recurring or not.
-      if (C.BENEFIT_RE.test(label)) return;
+      // Preferences and benefits first: a wallet balance or "notify me" is
+      // never a charge. But generic words in BENEFIT_RE ("agree", "apply",
+      // "terms", "save") do not cancel a priced paid extra or a priced
+      // recurring plan: "Extended Warranty ₹299 (T&C apply)" and "I agree to
+      // Auto-Renew ₹149/month" are charges (as on the server).
+      const recurringWords = C.RECURRING_BILLING_PATTERNS.some((p) => p.test(label)) && !EMI_RE.test(label);
+      const pricedCharge = amounts.length > 0 && (C.PAID_ADDON_RE.test(label) || recurringWords);
+      if (C.BENEFIT_RE.test(label) && !pricedCharge) return;
       // A radio is one of a REQUIRED choice. Its default is only the shop's
       // choice made for you when the group offers an explicit "no" or a free
       // option -- not when it picks between Monthly and Annual, or between
       // two ways to pay.
       if (isRadio && !groupHasDecline(el)) return;
-      const recurring = C.RECURRING_BILLING_PATTERNS.some((p) => p.test(label)) && !EMI_RE.test(label);
-      if (recurring && amounts.length) {
+      if (recurringWords && amounts.length) {
         findings.push({
           code: "DP-12", tier: "provable",
           title: "A repeating charge was already selected for you",

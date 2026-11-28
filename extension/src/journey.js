@@ -17,6 +17,8 @@
   const C = root.UlteriorCore, D = root.UlteriorDetect, P = root.UlteriorPlatform;
   const SITE = C.siteOf(location.hostname);
   const KEY = "journey:" + SITE;
+  // Path, query and hash together name the page: query- and hash-routed
+  // shops change only those between two products.
   const MAX_AGE_MS = 3 * 3600 * 1000;
   const NOT_PRICE = /\b(m\.?r\.?p|save|saving|off\b|emi|cashback|per\s+month)\b/i;
 
@@ -78,17 +80,17 @@
     // whole amount; a "Book" on a fare card is per person.
     const perPerson = !/\b(continue|proceed)\b/i.test(t) && onButton.length === 0
                       && source !== "the product page";
-    setJourney({ price, source, perPerson, disclosed, fp, at: Date.now(), path: location.pathname,
+    setJourney({ price, source, perPerson, disclosed, fp, at: Date.now(), path: (location.pathname + location.search + location.hash),
                  label: C.clip(C.redact(t), 30) });
   }
 
   /** Called on every scan of a product page. */
   async function noteProductPage(price, disclosed) {
     const j = await getJourney();
-    if (j && j.path === location.pathname && j.source === "the option you picked") return;
-    if (j && j.path === location.pathname && j.price === price) return;
+    if (j && j.path === (location.pathname + location.search + location.hash) && j.source === "the option you picked") return;
+    if (j && j.path === (location.pathname + location.search + location.hash) && j.price === price) return;
     setJourney({ price, source: "the product page", perPerson: false, disclosed: !!disclosed,
-                 fp: C.fingerprint(productName()), at: Date.now(), path: location.pathname, label: "" });
+                 fp: C.fingerprint(productName()), at: Date.now(), path: (location.pathname + location.search + location.hash), label: "" });
   }
 
   function timeOf(ms) {

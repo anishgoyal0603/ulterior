@@ -231,5 +231,13 @@ test("timestamps are not card numbers", () => {
   assert.strictEqual(C.redact("4111 1111 1111 1111"), "[CARD]");
 });
 
+// --- fifth code review (November 2026) ------------------------------------
+test("taxes-and-fees-included wording is not a disclosure of extra charges", () => {
+  for (const t of ["Inclusive of all taxes and fees", "All fees included", "\u20b90 delivery fee",
+                   "Delivery charges are included"]) {
+    assert.strictEqual(C.disclosesCharges(t), false, t);
+  }
+});
+
 if (failures) { console.log(`${failures} failed`); process.exit(1); }
 console.log("all passed");

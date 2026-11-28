@@ -295,8 +295,13 @@ def walk_discovered_funnel(start_url: str, screenshot_dir: str = DEFAULT_EVIDENC
                 wait_until_rendered(page)
             except Exception as exc:
                 log.notes.append(f"Could not load the starting URL: {type(exc).__name__}")
+                # Say WHY: usually the guard refused a redirect to a private
+                # address. (The browser is closed by the finally below.)
+                for note in guard.blocked:
+                    if note not in log.notes:
+                        log.notes.append(note)
+                trace.blocked_requests = list(guard.blocked)
                 trace.discovery = log.as_dict()
-                browser.close()
                 return trace
 
             capture("entry", reload_check=True)

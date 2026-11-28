@@ -22,7 +22,7 @@ import re
 from typing import List, Optional
 
 from .taxonomy import BY_CODE, PROVABLE, CORROBORATED, INDICATIVE, clamp_confidence
-from .vocab import RECURRING_BILLING_TERMS, BENEFIT_RE, matches_any as _matches_any, is_recurring_label  # noqa: F401
+from .vocab import RECURRING_BILLING_TERMS, BENEFIT_RE, PREFERENCE_RE, matches_any as _matches_any, is_recurring_label  # noqa: F401
 from .layer1_rules import Violation
 from capture.funnel_walker import FunnelTrace
 from capture.state_extractor import PageState, parse_money
@@ -82,7 +82,10 @@ LAWFUL_CONSENT_CONTEXT = [
 # legitimate disclosures, so only those may be excused by the lawful context.
 MARKETING_CONSENT_TERMS = [
     # Selling the shopper's data is never what a Terms box makes lawful.
-    r"\bshare (my|your) (data|details|information|personal)\b.*\b(advertis\w*|partners?|third[\s-]?part(y|ies)|affiliates?)\b",
+    # ...to advertisers or "marketing partners" -- not "delivery partners to
+    # fulfil this order", which is the transaction itself.
+    r"\bshare (my|your) (data|details|information|personal)\b.*\b(advertis\w*|affiliates?|"
+    r"marketing\s+partners?|(?<!delivery )(?<!courier )(?<!shipping )(?<!logistics )partners?\b(?!.*\b(deliver|fulfil|ship|courier)))",
     r"\badvertis(ing|ers?)\b", r"\baffiliates?\b.*\b(offers?|marketing|promot\w*|advertis\w*)\b",
     r"\bmarketing\b", r"\bpromotions?\b", r"\bpromotional\b", r"\bnewsletter\b",
     r"\boffers? and updates?\b", r"\bsms\b.*\boffers?\b", r"\bwhatsapp\b.*\b(offers?|updates?)\b",
@@ -440,10 +443,27 @@ def _text_near_button(state, button, chars: int = 400) -> str:
     elsewhere on the page is not read as this button's offer."""
     text = _without_emi_lines(state.full_text or "")
     label = (button.text or "").strip()
-    i = text.find(label) if label else -1
-    if i < 0:
+    if not label:
         return text
-    return text[max(0, i - chars):i + len(label) + chars]
+    # The button's own line, not the first place its words appear in prose:
+    # "Subscribe" in a "Subscribe to Prime Video ₹99/month" banner is not
+    # the footer's newsletter button. Prefer a line that IS the label; if
+    # several, the last (buttons sit under the copy they belong to).
+    lines = text.split("\n")
+    offsets, pos = [], 0
+    for ln in lines:
+        offsets.append(pos)
+        pos += len(ln) + 1
+    exact = [offsets[k] + lines[k].find(label) for k, ln in enumerate(lines) if ln.strip().lower() == label.lower()]
+    if exact:
+        i = exact[-1]
+    else:
+        i = text.rfind(label)
+        if i < 0:
+            return text
+    # Only the text BEFORE the button (the offer it belongs to) and a short
+    # tail; whatever follows it on the page is someone else's card.
+    return text[max(0, i - chars):i + len(label) + 80]
 
 
 _EMI_LINE = re.compile(r"\b(emi|emis|instal+ments?|pay later|no[\s-]cost)\b", re.IGNORECASE)
@@ -641,7 +661,7 @@ def detect_saas_billing(trace: FunnelTrace) -> List[Violation]:
                 # newsletter" and "Send me monthly order updates" are free
                 # email preferences, and were reported here at PROVABLE 1.0.
                 if (_matches_any(control.label_text, NON_COMMITMENT_SUBSCRIBE)
-                        or BENEFIT_RE.search(control.label_text)
+                        or PREFERENCE_RE.search(control.label_text)
                         or not _PAID_PLAN_RE.search(control.label_text)
                         or re.search(r"\bfree\b", control.label_text, re.IGNORECASE)):
                     continue

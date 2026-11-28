@@ -43,6 +43,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
 # which the client writes itself; with TRUST_PROXY_HEADERS=false the rate
 # limiter then keyed on a spoofable value. Off, the real peer address is kept.
 # (FORWARDED_ALLOW_IPS is uvicorn's own setting, read from the environment.)
-CMD if [ "$TRUST_PROXY_HEADERS" = "true" ]; then export FORWARDED_ALLOW_IPS='*'; PROXY=--proxy-headers; \
-    else PROXY=--no-proxy-headers; fi; \
+# Same spellings app/config.py accepts (1 / true / yes, any case).
+CMD case "$(echo "$TRUST_PROXY_HEADERS" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in \
+      1|true|yes) export FORWARDED_ALLOW_IPS='*'; PROXY=--proxy-headers ;; \
+      *) PROXY=--no-proxy-headers ;; \
+    esac; \
     exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} $PROXY

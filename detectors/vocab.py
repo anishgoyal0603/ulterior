@@ -67,6 +67,14 @@ BENEFIT_RE = re.compile(
     r"whats\s*app|updates|newsletter|gst\s+invoice|billing\s+address|same\s+as)\b"
     r"|वॉलेट|कैशबैक|कूपन|छूट|शर्तें|सहमत", re.IGNORECASE)
 
+# The narrow part of BENEFIT_RE: things that are a benefit or a preference
+# BY THEMSELVES. Not "agree", "terms", "apply" or "save", which also appear
+# in "I agree to auto-renew my Pro membership" -- a paid plan.
+PREFERENCE_RE = re.compile(
+    r"\b(wallet|balance|cash\s*back|coupon|points|super\s*coins|credits?|rewards?|notify|updates|newsletter|"
+    r"whats\s*app|remember\s+me|keep\s+me|signed\s+in|gst\s+invoice|billing\s+address|same\s+as)\b"
+    r"|वॉलेट|कैशबैक|कूपन", re.IGNORECASE)
+
 # Wording that names a paid extra (kept in step with PAID_ADDON_RE in core.js).
 PAID_ADDON_RE = re.compile(
     r"\b(insur(e|ance)|protect(ion|ed)?|warranty|secure\s+(my|your)\s+(trip|order|booking)|"

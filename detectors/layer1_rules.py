@@ -44,7 +44,10 @@ def _mentions_amount(text: str, amount: float) -> bool:
         # ₹1,299.50 / ₹1,23,456.50: the paise go on the TRUNCATED rupees with
         # the same grouping. (Rounding first gave "1,300.00" and never the
         # figure the page printed.)
-        rupees, paise = int(amount), f"{amount:.2f}".split(".")[1]
+        # Both parts from ONE rounding, so a boundary float (99.995) cannot
+        # give rupees from one value and paise from another.
+        rupees_s, paise = f"{amount:.2f}".split(".")
+        rupees = int(rupees_s)
         variants = {f"{rupees}.{paise}", f"{rupees:,}.{paise}", f"{_indian_grouping(rupees)}.{paise}"}
     variants = sorted(variants, key=len, reverse=True)
     haystack = text.replace("\u00a0", " ")
@@ -103,9 +106,13 @@ _NOT_A_TOTAL = re.compile(
     r"you\s+saved|total\s+(items?|qty|quantity))\b", re.IGNORECASE)
 
 
+# A FEE row: a fee noun ("Delivery fee", "Platform charge", "Convenience
+# fee") or a row that is only a fee word ("Delivery", "GST"). Bare nouns
+# inside a product name ("Packing Cubes", "Service Kit") are not fees.
 _FEE_WORDS = re.compile(
-    r"\b(fee|fees|charge|charges|delivery|shipping|handling|convenience|platform|tax|gst|surcharge|"
-    r"packaging|packing|cod|service|booking|processing)\b", re.IGNORECASE)
+    r"\b(fees?|charges?|surcharge|tax(es)?|gst|cess)\b"
+    r"|^\s*(delivery|shipping|handling|convenience|platform|packaging|packing|cod|service|booking|processing)"
+    r"(\s+(and|&)\s+\w+)?\s*$", re.IGNORECASE)
 
 
 def _stated_total(state: "PageState") -> Optional[float]:
@@ -519,12 +526,18 @@ _CLOCK_RE = re.compile(r"\b\d{1,3}\s*:\s*\d{2}(?:\s*:\s*\d{2})?\b")
 # "04h 22m 18s", "4 hrs 22 mins", "08m 12s" -- how Flipkart, Myntra and
 # Amazon write their timers.
 _UNIT_CLOCK_RE = re.compile(
-    r"\b(?:(\d{1,2})\s*h(?:rs?|ours?)?\s*(\d{1,2})\s*m(?:ins?|inutes?)?(?:\s*(\d{1,2})\s*s(?:ecs?|econds?)?)?"
+    # Seconds REQUIRED (as parseCountdown in extension/src/core.js): an
+    # honest "ends in 04h 22m" cannot tick within a 2-second reload, and
+    # "02h 15m" is usually a flight time.
+    r"\b(?:(\d{1,2})\s*h(?:rs?|ours?)?\s*(\d{1,2})\s*m(?:ins?|inutes?)?\s*(\d{1,2})\s*s(?:ecs?|econds?)?"
     r"|(\d{1,2})\s*m(?:ins?|inutes?)?\s*(\d{1,2})\s*s(?:ecs?|econds?)?)\b", re.IGNORECASE)
 # A clock that names a TIME OF DAY is a fixed closing time, not a countdown:
 # "Sale ends at 11:59 PM", "Offer ends 23:59 IST". Unchanged across a reload
 # is exactly what a closing time should be.
-_WALL_CLOCK_AFTER = re.compile(r"^\s*(a\.?m\.?|p\.?m\.?|ist|utc|gmt|hrs\b|o'?clock|tonight|today|tomorrow)", re.IGNORECASE)
+_WALL_CLOCK_AFTER = re.compile(r"^\s*(a\.?m\.?|p\.?m\.?|ist|utc|gmt|hrs\b|o'?clock)", re.IGNORECASE)
+# "11:59 tonight" is a closing time; "ends in 00:04:59 tonight" is a timer.
+_DAY_WORD_AFTER = re.compile(r"^\s*(tonight|today|tomorrow)\b", re.IGNORECASE)
+_IN_BEFORE = re.compile(r"\bin\s*:?\s*$", re.IGNORECASE)
 _WALL_CLOCK_BEFORE = re.compile(r"\b(at|until|till|by|before|on)\s*$", re.IGNORECASE)
 
 
@@ -542,6 +555,8 @@ def _find_clock(span: str) -> str:
             found.append((m.start(), m.end(), f"{int(m.group(4))}:{int(m.group(5)):02d}"))
     for start, end, value in sorted(found):
         if _WALL_CLOCK_AFTER.search(span[end:end + 12]) or _WALL_CLOCK_BEFORE.search(span[:start]):
+            continue
+        if _DAY_WORD_AFTER.search(span[end:end + 12]) and not _IN_BEFORE.search(span[:start]):
             continue
         return value
     return ""

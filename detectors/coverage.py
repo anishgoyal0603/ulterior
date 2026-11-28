@@ -45,7 +45,16 @@ def assess_coverage(trace, observed_codes: Iterable[str]) -> List[dict]:
     def _declines(s):
         return [b for b in (getattr(s, "buttons", []) or []) if getattr(b, "role", "") == "decline"]
     with_buttons = [s for s in states if _declines(s)]
-    with_pairs = any(_declines(s) and len(getattr(s, "buttons", []) or []) >= 2 for s in states)
+    # A decline AND something else to compare it with: two declines and no
+    # accept option gave DP-06 nothing to measure.
+    with_pairs = any(_declines(s) and any(getattr(b, "role", "") != "decline"
+                                          for b in (getattr(s, "buttons", []) or []))
+                     for s in states)
+    # DP-08 runs only when the LAST priced page states a total (see
+    # detect_drip_pricing). Anything less and the detector returned early,
+    # yet the report used to say "Not observed".
+    from detectors.layer1_rules import _STATES_A_TOTAL
+    drip_checked = len(priced) >= 2 and bool(_STATES_A_TOTAL.search(getattr(priced[-1], "full_text", "") or ""))
     reloads = bool(getattr(trace, "reload_pairs", None))
     roles = set((getattr(trace, "step_roles", {}) or {}).values())
     text = _text(states)
@@ -65,8 +74,8 @@ def assess_coverage(trace, observed_codes: Iterable[str]) -> List[dict]:
         "DP-06": need(with_pairs, "No decline option next to an accept option was found to compare."),
         "DP-07": need(len(priced) >= 2, "Fewer than two priced pages, so an advertised price could not be "
                                         "compared with a later one."),
-        "DP-08": need(bool(priced) and bool(totals) and n >= 2,
-                      "No first price followed by an itemised total (checkout) was captured."),
+        "DP-08": need(drip_checked,
+                      "No first price followed by a page stating a total (cart or checkout) was captured."),
         "DP-09": need(any_page, "No page was captured."),
         "DP-10": need(n >= 2, "Only one page was captured, so a repeated prompt could not be seen."),
         "DP-11": need(bool(with_boxes), "No page with checkboxes or consent options was captured."),

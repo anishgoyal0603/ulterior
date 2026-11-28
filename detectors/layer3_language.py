@@ -371,7 +371,7 @@ def detect_language_patterns(trace: FunnelTrace, use_llm: bool = False) -> List[
             code = candidate.get("pattern_code", "DP-03")
             if code not in BY_CODE:
                 continue
-            identity = (code, quoted.lower())
+            identity = (code, _norm(quoted))
             if identity in seen:
                 continue  # offline and LLM found the same thing -- report once
             seen.add(identity)
