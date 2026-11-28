@@ -201,15 +201,21 @@ def test_retention_counts_once_and_enforces_the_cap(monkeypatch):
     from app.retention import purge_expired
     old = datetime.now(timezone.utc) - timedelta(days=90)
     expired = [_job_with_screenshots(created_at=old.replace(tzinfo=None)) for _ in range(2)]
+    # The cap counts customer audits only; public-demo runs have their own
+    # cap (switched off here so this test measures one thing).
+    not_demo = (models.AuditJob.org.is_(None) | (models.AuditJob.org != config.DEMO_ORG))
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).replace(tzinfo=None)
     with SessionLocal() as db:
-        total = db.query(models.AuditJob).count()
-        old_count = db.query(models.AuditJob).filter(models.AuditJob.created_at < (datetime.now(timezone.utc) - timedelta(days=30)).replace(tzinfo=None)).count()
+        total = db.query(models.AuditJob).filter(not_demo).count()
+        old_all = db.query(models.AuditJob).filter(models.AuditJob.created_at < cutoff).count()
+        old_count = db.query(models.AuditJob).filter(not_demo, models.AuditJob.created_at < cutoff).count()
     monkeypatch.setattr(config, "RETENTION_DAYS", 30)
+    monkeypatch.setattr(config, "MAX_STORED_DEMO_AUDITS", 0)
     monkeypatch.setattr(config, "MAX_STORED_AUDITS", total - old_count - 1)
     removed = purge_expired()
-    assert removed == old_count + 1, (removed, old_count)
+    assert removed == old_all + 1, (removed, old_all)
     with SessionLocal() as db:
-        assert db.query(models.AuditJob).count() == total - old_count - 1
+        assert db.query(models.AuditJob).filter(not_demo).count() == total - old_count - 1
     for _, folder in expired:
         assert not folder.exists()
 

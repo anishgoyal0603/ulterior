@@ -80,14 +80,31 @@ def purge_expired() -> int:
             # leaves the real overflow in place.
             db.flush()
 
-        # 2. Count-based cap: keep only the newest MAX_STORED_AUDITS
+        # 2a. Public demo runs have their own, small cap. They come from an
+        #     unauthenticated endpoint; sharing one cap with customers meant a
+        #     burst of demo traffic could push real audits (and their
+        #     evidence) out of the database.
+        demo = (AuditJob.org == config.DEMO_ORG)
+        if config.MAX_STORED_DEMO_AUDITS > 0:
+            extra_demo = (db.query(AuditJob).filter(demo).count() - config.MAX_STORED_DEMO_AUDITS)
+            if extra_demo > 0:
+                for job in (db.query(AuditJob)
+                            .filter(demo, AuditJob.status.notin_(("pending", "running")))
+                            .order_by(AuditJob.created_at.asc()).limit(extra_demo).all()):
+                    delete_job_evidence(job)
+                    db.delete(job)
+                    removed += 1
+                db.flush()
+
+        # 2b. Count-based cap on everything else: keep only the newest MAX_STORED_AUDITS
+        not_demo = (AuditJob.org.is_(None) | (AuditJob.org != config.DEMO_ORG))
         if config.MAX_STORED_AUDITS > 0:
-            total = db.query(AuditJob).count()
+            total = db.query(AuditJob).filter(not_demo).count()
             excess = total - config.MAX_STORED_AUDITS
             if excess > 0:
                 oldest = (
                     db.query(AuditJob)
-                    .filter(AuditJob.status.notin_(("pending", "running")))
+                    .filter(not_demo, AuditJob.status.notin_(("pending", "running")))
                     .order_by(AuditJob.created_at.asc())
                     .limit(excess)
                     .all()

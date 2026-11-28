@@ -246,7 +246,7 @@ def test_the_public_demo_is_rate_limited(client):
     matched by no route rule -- so it fell through to the default 60/minute
     while config.py claimed the 5/minute audit limit applied."""
     from app.middleware import _ROUTE_LIMITS
-    assert any(prefix == "/demo-audit" for _, prefix, _, _, _ in _ROUTE_LIMITS)
+    assert any(rule[1] == "/demo-audit" for rule in _ROUTE_LIMITS)
 
 
 def test_the_limiter_forgets_idle_buckets():

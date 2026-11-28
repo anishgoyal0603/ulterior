@@ -68,12 +68,15 @@ class FunnelTrace:
     # a walk that came back thin because it was blocked must not read the same
     # as one that came back thin because the site was clean.
     blocked_requests: List[str] = field(default_factory=list)
+    # Set when the walk was stopped on request before it finished.
+    cancelled: bool = False
 
 
 def walk_funnel(adapter: SiteAdapter, screenshot_dir: str = DEFAULT_EVIDENCE_DIR,
                  reload_delay_seconds: float = 2.0, headless: bool = True,
                  dismiss_interruptions: bool = True,
-                 allow_file_urls: Optional[bool] = None) -> FunnelTrace:
+                 allow_file_urls: Optional[bool] = None,
+                 should_stop=None) -> FunnelTrace:
     os.makedirs(screenshot_dir, exist_ok=True)
     trace = FunnelTrace(site_name=adapter.site_name)
 
@@ -91,6 +94,9 @@ def walk_funnel(adapter: SiteAdapter, screenshot_dir: str = DEFAULT_EVIDENCE_DIR
             trusted_origins=[adapter.trusted_origin] if getattr(adapter, "trusted_origin", None) else None)
 
         for step in adapter.funnel_steps:
+            if should_stop is not None and should_stop():
+                trace.cancelled = True       # "Stop this audit": no more pages
+                break
             if step.url:
                 page.goto(step.url)
                 if step.wait_for_selector:

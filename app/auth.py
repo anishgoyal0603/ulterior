@@ -160,4 +160,6 @@ def require_admin_caller(
 def can_see(caller: Caller, job_org: Optional[str]) -> bool:
     if caller.admin:
         return True
-    return (job_org or config.DEFAULT_ORG) == caller.org
+    org = job_org or config.DEFAULT_ORG
+    # The public demo's runs are the team's to look at.
+    return org == caller.org or (caller.org == config.DEFAULT_ORG and org == config.DEMO_ORG)

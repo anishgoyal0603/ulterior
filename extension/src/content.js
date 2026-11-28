@@ -68,34 +68,40 @@
     const found = D.findCountdowns();
     if (!found.length) return;
     const t0 = Date.now();
-    found.forEach((f, i) => state.timers.set(i, { first: f.sec, at: t0, ctx: f.ctx }));
+    // Timers are matched by what they SAY around them, not by their position
+    // in the page: if one timer appears or disappears in between, position
+    // pairs two different timers.
+    const idOf = (f) => (f.ctx || "").replace(/\d+/g, "#").replace(/\s+/g, " ").trim().slice(0, 60);
+    found.forEach((f) => state.timers.set(idOf(f), { first: f.sec, at: t0, ctx: f.ctx }));
     await new Promise((r) => setTimeout(r, 3500));
     const again = D.findCountdowns();
     const findings = [];
-    for (let i = 0; i < Math.min(found.length, again.length); i++) {
-      const before = state.timers.get(i);
+    for (const cur of again) {
+      const id = idOf(cur);
+      const before = state.timers.get(id);
+      if (!before) continue;
       const elapsed = (Date.now() - before.at) / 1000;
-      const dropped = before.first - again[i].sec;
+      const dropped = before.first - cur.sec;
       if (dropped < 1 || dropped > elapsed + 2) continue;          // not a live countdown
-      const key = `timer:${SITE}${location.pathname}:${i}`;
+      const key = `timer:${SITE}${location.pathname}:${id}`;
       const prev = await P.Session.get(key);
       const now = Date.now();
-      await P.Session.set(key, { sec: again[i].sec, at: now });
+      await P.Session.set(key, { sec: cur.sec, at: now });
       if (!prev) continue;
       const gap = (now - prev.at) / 1000;
       const expected = prev.sec - gap;
-      if (gap >= 5 && again[i].sec > expected + 5) {
+      if (gap >= 5 && cur.sec > expected + 5) {
         const tm = (ms) => new Date(ms).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
         findings.push({
           code: "DP-01", tier: "corroborated",
           title: "The countdown started over when the page was opened again",
           detail: `It showed ${C.fmtClock(prev.sec)} at ${tm(prev.at)}. ${Math.round(gap)} seconds later it ` +
-            `showed ${C.fmtClock(again[i].sec)} instead of about ${C.fmtClock(expected)}. A deadline that resets ` +
+            `showed ${C.fmtClock(cur.sec)} instead of about ${C.fmtClock(expected)}. A deadline that resets ` +
             "is not measuring a real deadline.",
           evidence: {
-            countdown_text: C.redact(again[i].ctx),
+            countdown_text: C.redact(cur.ctx),
             earlier_reading: `${C.fmtClock(prev.sec)} at ${tm(prev.at)}`,
-            later_reading: `${C.fmtClock(again[i].sec)} at ${tm(now)}`,
+            later_reading: `${C.fmtClock(cur.sec)} at ${tm(now)}`,
             expected_if_real: `about ${C.fmtClock(expected)}`,
           },
         });

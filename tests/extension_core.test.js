@@ -162,10 +162,41 @@ test("own readings win over community ones on the same day", () => {
   assert.deepStrictEqual(m.map((x) => x.p), [130, 100]);
 });
 
-test("watched links drop their query string", () => {
-  assert.strictEqual(C.cleanProductUrl("https://www.flipkart.com/x/p/itm1?pid=A&affid=me&q=secret"), "https://www.flipkart.com/x/p/itm1");
+test("watched links drop their query string, except a product id", () => {
+  // Tracking and search parameters go; the product-id parameter stays,
+  // because on query-routed shops it is the only thing naming the product.
+  assert.strictEqual(C.cleanProductUrl("https://www.flipkart.com/x/p/itm1?pid=A&affid=me&q=secret"), "https://www.flipkart.com/x/p/itm1?pid=A");
+  assert.strictEqual(C.cleanProductUrl("https://www.flipkart.com/x/p/itm1?affid=me&q=secret"), "https://www.flipkart.com/x/p/itm1");
   assert.strictEqual(C.cleanProductUrl("javascript:alert(1)"), null);
   assert.strictEqual(C.suggestTarget(69900), 66400);
+});
+
+// --- second code review (November 2026) -----------------------------------
+test("'rs' and 'inr' inside a word are not rupees", () => {
+  const v = (s) => C.parseAmounts(s).map((a) => a.value);
+  assert.deepStrictEqual(v("SNEAKERS 55"), []);
+  assert.deepStrictEqual(v("OFFERS 200 and YEARS 2"), []);
+  assert.deepStrictEqual(v("Rs. 499"), [499]);
+});
+
+test("a spaced minus is a discount only at the start or after '('", () => {
+  const v = (s) => C.parseAmounts(s).map((a) => a.value);
+  assert.deepStrictEqual(v("- ₹ 130"), [-130]);
+  assert.deepStrictEqual(v("(- ₹ 130)"), [-130]);
+  assert.deepStrictEqual(v("Convenience Fee - ₹49"), [49]);
+});
+
+test("query-routed shops keep their product id in the key", () => {
+  const a = C.productKey("http://127.0.0.1:8000/shop/product.php?id=1");
+  const b = C.productKey("http://127.0.0.1:8000/shop/product.php?id=2");
+  assert.notStrictEqual(a, b);
+  assert.strictEqual(C.productKey("http://127.0.0.1:8000/shop/product.php?id=1&utm_source=x"), a);
+});
+
+test("phones are redacted, but not the tail of a longer code", () => {
+  assert.strictEqual(C.redact("Call 9876543210 now"), "Call [PHONE] now");
+  assert.strictEqual(C.redact("Call +91 98765 43210"), "Call [PHONE]");
+  assert.strictEqual(C.redact("SKU9876543210"), "SKU9876543210");
 });
 
 if (failures) { console.log(`${failures} failed`); process.exit(1); }

@@ -27,8 +27,14 @@
   // A minus counts only when it touches the amount ("-₹50" off a wallet). In
   // "Delivery Fee - ₹49" the dash is punctuation, and reading it as a minus
   // turned a fee into a refund.
+  //
+  // "rs" and "inr" count only when they are not the end of a word: without
+  // the look-behind, "SNEAKERS 55", "OFFERS 200" and "YEARS 2" were read as
+  // rupees. A minus with a space after it ("- \u20b9 130", the way MakeMyTrip
+  // writes a discount) counts only when it starts the text or follows "(" --
+  // never after a word, so "Fee - \u20b949" stays a charge.
   const AMOUNT_RE =
-    /((?:-|\u2212)(?=\u20b9|rs\.?|inr|\u0930\u0941))?\s*(?:\u20b9|rs\.?|inr|\u0930\u0941\u092a\u092f\u0947|\u0930\u0941\.?)\s*([0-9]{1,3}(?:,[0-9]{2,3})+(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)(?:\s*\/-)?/gi;
+    /((?:-|\u2212)(?=\u20b9|(?<![A-Za-z])(?:rs\.?|inr)|\u0930\u0941)|(?:^|(?<=\())\s*(?:-|\u2212)\s(?=\s*(?:\u20b9|(?<![A-Za-z])(?:rs\.?|inr)|\u0930\u0941)))?\s*(?:\u20b9|(?<![A-Za-z])(?:rs\.?|inr)|\u0930\u0941\u092a\u092f\u0947|\u0930\u0941\.?)\s*([0-9]{1,3}(?:,[0-9]{2,3})+(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)(?:\s*\/-)?/gi;
 
   function parseAmounts(text) {
     const out = [];
@@ -208,7 +214,8 @@
     [/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[EMAIL]"],
     [/\b(?:\d[ -]*?){13,19}\b/g, "[CARD]"],
     [/\b\d{4}[ -]?\d{4}[ -]?\d{4}\b/g, "[ID]"],
-    [/(?:\+?91[\s-]?|\b0)?[6-9](?:[\s-]?\d){9}\b/g, "[PHONE]"],
+    // Not inside a longer code: "SKU9876543210" is not a phone number.
+    [/(?:\+?91[\s-]?|(?<![A-Za-z0-9])0|(?<![A-Za-z0-9]))[6-9](?:[\s-]?\d){9}\b/g, "[PHONE]"],
     [/\b[A-Z]{5}[0-9]{4}[A-Z]\b/g, "[PAN]"],
     [/\b(pnr|booking\s*id|order\s*id|booking\s*ref(erence)?)\s*(no\.?|number)?\s*[:#-]?\s*[A-Z0-9-]{5,}/gi, "$1 [REF]"],
   ];
@@ -262,6 +269,17 @@
     return lastTwo;
   }
 
+  const PRODUCT_ID_PARAMS = ["product_id", "productId", "productid", "pid", "item_id", "itemId", "sku", "variant", "id"];
+
+  /** "product_id=42" from a query-routed product URL, or "". */
+  function productIdParam(u) {
+    for (const name of PRODUCT_ID_PARAMS) {
+      const v = u.searchParams.get(name);
+      if (v && /^[A-Za-z0-9_-]{1,40}$/.test(v)) return `${name}=${v}`;
+    }
+    return "";
+  }
+
   /** A stable id for "this product", for the on-device price history.
    *  Only the product identifier is kept, never the full URL. */
   function productKey(urlString, canonicalHref) {
@@ -291,6 +309,12 @@
       } catch (e) { /* keep our own path */ }
     }
     p = p.replace(/\/+$/, "") || "/";
+    // Stores that route products by query string (OpenCart's
+    // ?route=product/product&product_id=42, many PHP shops) would otherwise
+    // collapse every product into one key. Only a known product-id
+    // parameter is kept -- never the rest of the query.
+    const idParam = productIdParam(u);
+    if (idParam) return `${site}:${p.slice(0, 120)}?${idParam}`;
     if (p === "/") return null;
     return `${site}:${p.slice(0, 160)}`;
   }
@@ -546,7 +570,8 @@
     try {
       const x = new URL(u);
       if (!/^https?:$/.test(x.protocol)) return null;
-      return x.origin + x.pathname;
+      const idParam = productIdParam(x);   // the product id only, nothing else
+      return x.origin + x.pathname + (idParam ? "?" + idParam : "");
     } catch (e) { return null; }
   }
 

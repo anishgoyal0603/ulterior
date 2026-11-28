@@ -2,7 +2,8 @@
 officer or regulator would actually review, with evidence linked per
 violation, not a bare score."""
 
-from datetime import datetime
+import os
+from datetime import datetime, timezone
 from xml.sax.saxutils import escape as _esc
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -22,12 +23,29 @@ def _ensure_font():
     global _FONT_REGISTERED
     if _FONT_REGISTERED:
         return
-    try:
-        pdfmetrics.registerFont(TTFont("DejaVuSans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"))
-        pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"))
-        _FONT_REGISTERED = True
-    except Exception:
-        pass  # falls back to Helvetica (₹ will render as a box) if font truly unavailable
+    # The bundled copy first (report/fonts, DejaVu licence alongside), so a
+    # report made on Windows or macOS prints ₹ instead of a black box; then
+    # system fonts that have the rupee sign.
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+    candidates = [
+        (os.path.join(here, "DejaVuSans.ttf"), os.path.join(here, "DejaVuSans-Bold.ttf")),
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        (r"C:\Windows\Fonts\Nirmala.ttf", r"C:\Windows\Fonts\NirmalaB.ttf"),
+        (r"C:\Windows\Fonts\segoeui.ttf", r"C:\Windows\Fonts\segoeuib.ttf"),
+        ("/System/Library/Fonts/Supplemental/Arial Unicode.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
+        ("/Library/Fonts/Arial Unicode.ttf", "/Library/Fonts/Arial Unicode.ttf"),
+    ]
+    for regular, bold in candidates:
+        if not (os.path.isfile(regular) and os.path.isfile(bold)):
+            continue
+        try:
+            pdfmetrics.registerFont(TTFont("DejaVuSans", regular))
+            pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold))
+            _FONT_REGISTERED = True
+            return
+        except Exception:
+            continue
+    # Otherwise Helvetica, which has no ₹ glyph.
 
 
 _AUTHORITY_TEXT = {
@@ -75,7 +93,9 @@ def generate_audit_report(site_name: str, violations: list, output_path: str, *,
     story.append(Paragraph(f"Produced by Ulterior by The Odyssey &nbsp;·&nbsp; {reference}",
                            styles["Italic"]))
     story.append(Paragraph(
-        f"Generated {datetime.now().strftime('%d %b %Y, %H:%M')} &nbsp;|&nbsp; "
+        # Labelled, and in the same clock as every other time in the report
+        # (the permission and evidence times are UTC).
+        f"Generated {datetime.now(timezone.utc).strftime('%d %b %Y, %H:%M')} UTC &nbsp;|&nbsp; "
         f"Assessed against India's Guidelines for Prevention and Regulation of "
         f"Dark Patterns, 2023 (13 patterns)",
         normal
@@ -174,7 +194,7 @@ def generate_audit_report(site_name: str, violations: list, output_path: str, *,
     # lines and split "Evidence tier" mid-word -- a table too cramped to read
     # undermines the whole point of a report a non-technical official is
     # supposed to verify by eye.
-    table = Table(table_data, colWidths=[88, 58, 38, 62, 38, 224])
+    table = Table(table_data, colWidths=[88, 58, 38, 62, 38, 224], repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a1a2e")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),

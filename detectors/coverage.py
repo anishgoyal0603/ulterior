@@ -38,8 +38,14 @@ def assess_coverage(trace, observed_codes: Iterable[str]) -> List[dict]:
     priced = [s for s in states if getattr(s, "price", None) is not None]
     totals = [s for s in states if getattr(s, "line_items", None)]
     with_boxes = [s for s in states if getattr(s, "checkboxes", None)]
-    with_buttons = [s for s in states if len(getattr(s, "buttons", []) or []) >= 1]
-    with_pairs = len([s for s in states if len(getattr(s, "buttons", []) or []) >= 2]) > 0
+    # DP-03 and DP-06 judge a DECLINE option (its wording, its prominence
+    # next to the accept option). A page with buttons but no decline option
+    # gave those detectors nothing to evaluate -- that is "not assessed",
+    # not "not observed".
+    def _declines(s):
+        return [b for b in (getattr(s, "buttons", []) or []) if getattr(b, "role", "") == "decline"]
+    with_buttons = [s for s in states if _declines(s)]
+    with_pairs = any(_declines(s) and len(getattr(s, "buttons", []) or []) >= 2 for s in states)
     reloads = bool(getattr(trace, "reload_pairs", None))
     roles = set((getattr(trace, "step_roles", {}) or {}).values())
     text = _text(states)
@@ -52,11 +58,11 @@ def assess_coverage(trace, observed_codes: Iterable[str]) -> List[dict]:
                       "No page was reloaded to test whether a timer or stock count is real."
                       if any_page else "No page was captured."),
         "DP-02": need(bool(with_boxes or totals), "No cart or checkout page (options or line items) was reached."),
-        "DP-03": need(bool(with_buttons), "No page with accept/decline choices was captured."),
+        "DP-03": need(bool(with_buttons), "No decline option (\"No thanks\", \"Skip\", ...) was found to read."),
         "DP-04": need(any_page, "No page was captured."),
         "DP-05": need("cancel" in roles or "signup" in roles or any(w in text for w in _SUBSCRIPTION_WORDS),
                       "No subscription, trial or cancellation page was in scope."),
-        "DP-06": need(with_pairs, "No page offered two choices to compare."),
+        "DP-06": need(with_pairs, "No decline option next to an accept option was found to compare."),
         "DP-07": need(len(priced) >= 2, "Fewer than two priced pages, so an advertised price could not be "
                                         "compared with a later one."),
         "DP-08": need(bool(priced) and bool(totals) and n >= 2,

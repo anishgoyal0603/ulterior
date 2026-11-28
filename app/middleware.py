@@ -129,7 +129,13 @@ _ROUTE_LIMITS = [
     # counted in different buckets, so "3 destructive operations per hour"
     # never fired for the route it was written for -- eleven deletes in a row
     # all returned 204. One bucket per ROUTE is what the limit means.
-    ("POST", "/audits", lambda: config.RATE_LIMIT_AUDIT_PER_MINUTE, 60, "POST:/audits"),
+    # Cancel and review are POSTs under /audits/{id}/..., and the prefix
+    # match below used to count them as NEW audits: reviewing five audits in a
+    # minute locked the operator out of starting, stopping or reviewing any.
+    ("POST", "/audits/", lambda: config.RATE_LIMIT_AUDIT_ACTIONS_PER_MINUTE, 60, "POST:audit-actions",
+     lambda path: path.rstrip("/") != "/audits"),
+    ("POST", "/audits", lambda: config.RATE_LIMIT_AUDIT_PER_MINUTE, 60, "POST:/audits",
+     lambda path: path.rstrip("/") == "/audits"),
     ("DELETE", "/audits", lambda: config.RATE_LIMIT_DELETE_PER_HOUR, 3600, "DELETE:/audits"),
     # The public demo starts a headless browser for anyone, with no key. It
     # was matched by neither prefix above, so it fell through to the default

@@ -53,6 +53,8 @@ UNRELATED_CONSENT_TERMS = [
     r"\brefer a friend\b", r"\binvite (your )?(friends?|contacts?)\b",
     r"\baccess (to )?(your )?contacts?\b", r"\bfollow us\b",
     r"\bsms\b.*\boffers?\b", r"\bwhatsapp\b.*\b(offers?|updates?)\b",
+    # Either order: "offers on WhatsApp" is as common as "WhatsApp offers".
+    r"\b(offers?|deals?|updates?)\b.*\b(whatsapp|sms)\b", r"\breceive (exclusive |special )?(offers?|deals?)\b",
     r"\bpersonalised? ads?\b", r"\btargeted ads?\b",
 ]
 
@@ -70,6 +72,20 @@ LAWFUL_CONSENT_CONTEXT = [
     r"\bdeliver(y|ies)\b.*\bpartners?\b", r"\bpartners?\b.*\bdeliver(y|ies)\b",
     r"\bcourier\b", r"\bshipment\b", r"\bfulfil(l)?ment\b",
     r"\brequired by law\b", r"\bgrievance\b",
+]
+
+# Consent that is plainly for SELLING TO the shopper. Bundling one of these
+# into a mandatory box is the dark pattern whatever else the label says --
+# "I agree to the Terms of Use and to receive promotional offers on WhatsApp"
+# names the terms AND the marketing, and the terms do not make the marketing
+# lawful. Only the softer terms ("third parties", "partners") can be
+# legitimate disclosures, so only those may be excused by the lawful context.
+MARKETING_CONSENT_TERMS = [
+    r"\bmarketing\b", r"\bpromotions?\b", r"\bpromotional\b", r"\bnewsletter\b",
+    r"\boffers? and updates?\b", r"\bsms\b.*\boffers?\b", r"\bwhatsapp\b.*\b(offers?|updates?)\b",
+    r"\b(offers?|deals?|updates?)\b.*\b(whatsapp|sms)\b", r"\breceive (exclusive |special )?(offers?|deals?)\b",
+    r"\bpersonalised? ads?\b", r"\btargeted ads?\b", r"\brefer a friend\b",
+    r"\binvite (your )?(friends?|contacts?)\b", r"\baccess (to )?(your )?contacts?\b", r"\bfollow us\b",
 ]
 
 # Framing that impersonates the operating system or a security product.
@@ -163,8 +179,10 @@ def detect_forced_action(trace: FunnelTrace) -> List[Violation]:
             # `third parties` and was reported at PROVABLE 1.0 as a purpose
             # "not required to complete the transaction" -- accusing a shop of
             # a dark pattern for showing the disclosure the law requires.
-            if _matches_any(label_text, LAWFUL_CONSENT_CONTEXT):
+            if (_matches_any(label_text, LAWFUL_CONSENT_CONTEXT)
+                    and not _matches_any(label_text, MARKETING_CONSENT_TERMS)):
                 continue
+            matched = _matches_any(label_text, MARKETING_CONSENT_TERMS) or matched
             violations.append(Violation(
                 pattern_code="DP-04", pattern_name=BY_CODE["DP-04"].name,
                 step_name=state.step_name,
@@ -273,7 +291,7 @@ def detect_subscription_trap(trace: FunnelTrace) -> List[Violation]:
         offer_disclosure = _matches_any(offer_state.full_text, RECURRING_BILLING_TERMS)
         if not offer_disclosure:
             for later in trace.states[offer_index + 1:]:
-                late_disclosure = _matches_any(later.full_text, RECURRING_BILLING_TERMS)
+                late_disclosure = _matches_any(_without_emi_lines(later.full_text), RECURRING_BILLING_TERMS)
                 if late_disclosure:
                     violations.append(Violation(
                         pattern_code="DP-05", pattern_name=BY_CODE["DP-05"].name,
@@ -397,6 +415,23 @@ COMMITMENT_CTA = [
     r"\bstart (my )?(free )?trial\b", r"\bsubscribe\b", r"\bstart (my )?membership\b",
     r"\bget (started|premium|plus|pro)\b", r"\bupgrade\b", r"\bjoin now\b",
 ]
+# These CTAs are on every kind of page ("Join now" to a loyalty club, "Get
+# started" on a sign-up form). They only count as a paid commitment when the
+# page itself talks about a plan, membership, trial or recurring price.
+_WEAK_COMMITMENT_CTA = [r"\bget started\b", r"\bjoin now\b", r"\bupgrade\b"]
+_PLAN_CONTEXT = re.compile(
+    r"\b(subscription|membership|member|plan|trial|premium|renews?|auto[\s-]?renew|billed|per month|/\s*mo(nth)?)\b",
+    re.IGNORECASE)
+
+
+_EMI_LINE = re.compile(r"\b(emi|emis|instal+ments?|pay later|no[\s-]cost)\b", re.IGNORECASE)
+
+
+def _without_emi_lines(text: str) -> str:
+    """Drop instalment lines: "EMI from ₹200 monthly" is a way to pay for one
+    purchase, not a recurring subscription, and read as one it made a
+    checkout with an EMI option look like a late subscription disclosure."""
+    return "\n".join(ln for ln in (text or "").splitlines() if not _EMI_LINE.search(ln))
 
 
 def _first_commitment_state(trace: FunnelTrace):
@@ -429,6 +464,8 @@ def _first_commitment_state(trace: FunnelTrace):
             text = state.full_text or ""
             if _RECURRING_PRICE_RE.search(text):
                 return state, index
+            if _matches_any(button.text, _WEAK_COMMITMENT_CTA) and not _PLAN_CONTEXT.search(text):
+                continue
             if _matches_any(text, NON_COMMITMENT_SUBSCRIBE):
                 continue
             return state, index

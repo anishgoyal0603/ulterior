@@ -224,7 +224,7 @@ def _same_tab(element) -> None:
 
 def walk_discovered_funnel(start_url: str, screenshot_dir: str = DEFAULT_EVIDENCE_DIR,
                            reload_delay_seconds: float = 2.0, headless: bool = True,
-                           site_name: Optional[str] = None) -> FunnelTrace:
+                           site_name: Optional[str] = None, should_stop=None) -> FunnelTrace:
     """Walk from one URL to the checkout, discovering each step.
 
     Returns the same FunnelTrace every detector already understands, so no
@@ -299,6 +299,10 @@ def walk_discovered_funnel(start_url: str, screenshot_dir: str = DEFAULT_EVIDENC
 
         refused_next = []     # forbidden controls that matched a step we needed
         for stage_name, intents in STAGES + [FINAL_STAGE]:
+            if should_stop is not None and should_stop():
+                trace.cancelled = True
+                log.notes.append("Stopped on request before the walk finished.")
+                break
             found = _find_control(page, intents, log, refused_next)
             if not found:
                 log.skipped.append(stage_name)

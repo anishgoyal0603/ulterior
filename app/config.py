@@ -148,6 +148,10 @@ MAX_ACTIVE_AUDITS_PER_ORG = max(1, int(os.environ.get("MAX_ACTIVE_AUDITS_PER_ORG
 # (see app/retention.py). 0 disables automatic purging.
 RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS", "30"))
 MAX_STORED_AUDITS = int(os.environ.get("MAX_STORED_AUDITS", "500"))
+# Public demo runs are kept separately (organisation "public-demo") with their
+# own cap, so demo traffic can never evict a customer's audits.
+DEMO_ORG = "public-demo"
+MAX_STORED_DEMO_AUDITS = int(os.environ.get("MAX_STORED_DEMO_AUDITS", "50"))
 
 # Rate limits (requests per window, per client IP)
 RATE_LIMIT_AUDIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_AUDIT_PER_MINUTE", "5"))
@@ -160,6 +164,8 @@ RATE_LIMIT_DEFAULT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_DEFAULT_PER_MINUT
 # These budgets are still bounded -- they cap memory and abuse -- but they are
 # sized for what the page genuinely does rather than for launching browsers.
 RATE_LIMIT_POLL_PER_MINUTE = int(os.environ.get("RATE_LIMIT_POLL_PER_MINUTE", "240"))
+# Cancel / review an existing audit (cheap, and an operator does many in a row).
+RATE_LIMIT_AUDIT_ACTIONS_PER_MINUTE = int(os.environ.get("RATE_LIMIT_AUDIT_ACTIONS_PER_MINUTE", "60"))
 # PDF reports and evidence verification: real CPU and disk work per call.
 RATE_LIMIT_HEAVY_PER_MINUTE = int(os.environ.get("RATE_LIMIT_HEAVY_PER_MINUTE", "30"))
 RATE_LIMIT_STATIC_PER_MINUTE = int(os.environ.get("RATE_LIMIT_STATIC_PER_MINUTE", "600"))
@@ -233,6 +239,14 @@ def validate() -> None:
                 problems.append(
                     "ADMIN_API_KEYS is not set. Set it explicitly to the key(s) allowed to "
                     "delete audits and see every organisation -- never the dashboard's key."
+                )
+            elif not ADMIN_API_KEYS or _parse_keys(_raw_admin)[2]:
+                # Set, but nothing usable came out of it (a bad "org:" prefix,
+                # stray commas): production must not boot with zero admin keys.
+                problems.append(
+                    "ADMIN_API_KEYS is set but contains no valid key"
+                    + (f" (bad entries: {', '.join(_parse_keys(_raw_admin)[2])})"
+                       if _parse_keys(_raw_admin)[2] else "") + "."
                 )
             unknown_admin = [k for k in ADMIN_API_KEYS if k not in API_KEYS]
             if unknown_admin:

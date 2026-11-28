@@ -473,6 +473,15 @@ def _dom_money_rows(page):
     return unique
 
 
+# A control that turns an offer DOWN, by its wording (kept in step with
+# DECLINE_RE in extension/src/core.js).
+DECLINE_TEXT_RE = re.compile(
+    r"^\s*(no[,.]?\s*thanks?|no\s+thank\s+you|skip(\s+this)?|not\s+now|maybe\s+later|"
+    r"remind\s+me\s+later|decline|i'?ll\s+(pass|skip)|continue\s+without|no[,.]?\s+i\b|"
+    r"i\s+don'?t\s+want|i\s+do\s+not\s+want|nahi[,.]?\s*(chahiye|thanks)|abhi\s+nahi)\b"
+    r"|^\s*(नहीं,?\s*धन्यवाद|अभी\s*नहीं|छोड़ें|रहने\s*दें|मुझे\s*नहीं\s*चाहिए)",
+    re.IGNORECASE)
+
 _SAVINGS_RE = re.compile(r"\b(you\s+)?(save|saved|saving|savings)\b", re.IGNORECASE)
 
 
@@ -792,6 +801,11 @@ def extract_page_state(page, step_name: str, price_selector_override: str = None
             continue
         cls = el.get_attribute("class") or ""
         role = "accept" if "accept" in cls else "decline" if "decline" in cls else "neutral"
+        # Real shops use Tailwind, CSS modules or their own names, never
+        # "btn-decline". Without reading the WORDS, DP-03 and DP-06 could only
+        # ever fire on our own fixtures. Same wording rule as the extension.
+        if role == "neutral" and DECLINE_TEXT_RE.search(text.replace("\u2019", "'")):
+            role = "decline"
         try:
             box = el.bounding_box()
         except Exception:

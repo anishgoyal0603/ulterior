@@ -28,6 +28,7 @@ import ipaddress
 import logging
 import socket
 import threading
+from collections import deque
 from typing import Callable, List, Optional
 from urllib.parse import urlsplit
 
@@ -70,7 +71,8 @@ class EgressProxy:
         self.trusted = trusted_hostports if trusted_hostports is not None else (
             _default_trusted() if ip_allowed is None else set())
         self.port: Optional[int] = None
-        self.refused: List[str] = []
+        # Bounded: the shared proxy lives as long as the process.
+        self.refused: deque = deque(maxlen=500)
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._ready = threading.Event()
         self._error: Optional[BaseException] = None
@@ -98,7 +100,7 @@ class EgressProxy:
         self._loop.run_forever()
 
     # ---------------------------------------------------------------- policy
-    async def _pick_address(self, host: str, port: int) -> Optional[str]:
+    async def _pick_addresses(self, host: str, port: int) -> Optional[List[str]]:
         host = host.strip("[]")
         trusted = f"{host.lower()}:{port}" in self.trusted
         try:
@@ -116,7 +118,10 @@ class EgressProxy:
         # resolves to one public and one internal address is refused.
         if not trusted and not all(self.ip_allowed(ip) for ip in candidates):
             return None
-        return candidates[0]
+        # Every address passed, so any of them may be used. IPv4 first: many
+        # containers and Indian ISPs have no IPv6 route, and an AAAA answer
+        # listed first used to fail the whole request after a 15 s timeout.
+        return sorted(candidates, key=lambda ip: ":" in ip)
 
     # ---------------------------------------------------------------- traffic
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -145,22 +150,35 @@ class EgressProxy:
                 rest = ("\r\n".join([f"{method} {path} {version}"] + kept + ["Connection: close", "", ""])
                         ).encode("latin-1")
 
-            address = await self._pick_address(host, port)
-            if address is None:
+            addresses = await self._pick_addresses(host, port)
+            if not addresses:
                 note = f"{host}:{port}"
                 if note not in self.refused:
                     self.refused.append(note)
                 return await self._reply(writer, 403, "Blocked by audit network policy")
 
-            up_reader, upstream_writer = await asyncio.wait_for(
-                asyncio.open_connection(address, port), timeout=15)
+            up_reader = None
+            for address in addresses:          # only addresses that were checked
+                try:
+                    up_reader, upstream_writer = await asyncio.wait_for(
+                        asyncio.open_connection(address, port), timeout=8)
+                    break
+                except (OSError, asyncio.TimeoutError):
+                    continue
+            if up_reader is None:
+                return await self._reply(writer, 502, "Could not connect")
             if method.upper() == "CONNECT":
                 writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
                 await writer.drain()
             else:
                 upstream_writer.write(rest)
                 await upstream_writer.drain()
-            await asyncio.gather(self._pipe(reader, upstream_writer), self._pipe(up_reader, writer))
+            # Client -> server may finish first (a half-close after the
+            # request); that must not tear down the reply. The exchange is
+            # over when the SERVER side finishes; then the other pipe stops.
+            upload = asyncio.ensure_future(self._pipe(reader, upstream_writer))
+            await self._pipe(up_reader, writer)
+            upload.cancel()
         except (asyncio.TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError,
                 ConnectionError, OSError, ValueError):
             pass
@@ -174,6 +192,8 @@ class EgressProxy:
 
     @staticmethod
     async def _pipe(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:
+        """Copy until EOF, then pass the EOF on (a half-close), without
+        closing the connection the other direction still needs."""
         try:
             while True:
                 data = await asyncio.wait_for(src.read(65536), timeout=_IDLE_SECONDS)
@@ -181,13 +201,10 @@ class EgressProxy:
                     break
                 dst.write(data)
                 await dst.drain()
+            if dst.can_write_eof():
+                dst.write_eof()
         except Exception:
             pass
-        finally:
-            try:
-                dst.close()
-            except Exception:
-                pass
 
     @staticmethod
     async def _reply(writer: asyncio.StreamWriter, code: int, text: str) -> None:

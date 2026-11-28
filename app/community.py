@@ -31,7 +31,9 @@ SUPPORTED_SITES = [
 ]
 _DEV_SITES = {"127.0.0.1", "localhost"}
 
-KEY_RE = re.compile(r"^([a-z0-9.-]{3,60}):([A-Za-z0-9/_.~%+-]{1,160})$")
+# The path may end with ONE product-id parameter, for shops that route
+# products by query string (extension/src/core.js productIdParam).
+KEY_RE = re.compile(r"^([a-z0-9.-]{3,60}):([A-Za-z0-9/_.~%+-]{1,160})(?:\?[A-Za-z_]{1,20}=[A-Za-z0-9_-]{1,40})?$")
 MIN_PRICE, MAX_PRICE = 1.0, 10_000_000.0
 
 

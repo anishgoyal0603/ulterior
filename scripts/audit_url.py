@@ -36,8 +36,18 @@ import argparse
 import json
 import sys
 from pathlib import Path
+import builtins
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+
+def print(*args, **kwargs):          # noqa: A001 -- deliberately shadows print in this script
+    """Everything this script prints is passed through the same redaction as
+    stored evidence. It prints text read off pages -- often a logged-in
+    checkout -- and a terminal log or a pasted screenshot is still a copy."""
+    from app.privacy import redact
+    builtins.print(*(redact(a) if isinstance(a, str) else a for a in args), **kwargs)
+
 
 # Public sandboxes maintained BY the testing community FOR automated tools.
 # They are the honest way to prove this works on a site nobody prepared for
@@ -146,7 +156,7 @@ def audit_saved_pages(paths, show_html: bool = False):
         if not resolved.exists():
             print(f"  NOT FOUND: {resolved}")
             return {"error": f"file not found: {resolved}"}
-        steps.append(FunnelStep(name=resolved.stem[:40], url="file://" + str(resolved)))
+        steps.append(FunnelStep(name=resolved.stem[:40], url=resolved.as_uri()))
 
     print("=" * 78)
     print("  Pages you saved from your own browser")

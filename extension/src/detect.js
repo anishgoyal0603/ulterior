@@ -269,7 +269,7 @@
       const v = amountForLabel(el);
       if (v === null || v <= 0) continue;
       // The label without its amount: "Convenience fee ₹350" -> "Convenience fee".
-      const label = C.clip(text.replace(/(-|−)?\s*(₹|rs\.?|inr)\s*[\d,.]+(\s*\/-)?/gi, "")
+      const label = C.clip(text.replace(/(-|−)?\s*(₹|(?<![A-Za-z])(?:rs\.?|inr))\s*[\d,.]+(\s*\/-)?/gi, "")
                                .replace(/[:\s-]+$/, "").trim(), 40);
       const key = label.toLowerCase() + "|" + v;
       if (seen.has(key)) continue;
@@ -470,8 +470,11 @@
       if (decline.tagName !== "INPUT" && !C.DECLINE_RE.test(C.normalizeQuotes(fast(decline)))) continue;
       const dt = clickableText(decline);
       if (!dt || dt.length > 80 || !C.DECLINE_RE.test(dt) || !isVisible(decline)) continue;
+      // The container is the one where the accept option was FOUND. The loop
+      // used to step to the parent once more after finding it, so the offer
+      // text was read one level too high (or from nothing near <body>).
       let container = decline.parentElement, accept = null;
-      for (let i = 0; container && i < 5 && !accept; i++, container = container.parentElement) {
+      for (let i = 0; container && i < 5; i++) {
         for (const cand of container.querySelectorAll(CLICKABLE)) {
           if (cand === decline || cand.contains(decline) || decline.contains(cand)) continue;
           const at = clickableText(cand);
@@ -479,6 +482,8 @@
           accept = cand;
           break;
         }
+        if (accept) break;
+        container = container.parentElement;
       }
       if (!accept) continue;
       // Only where something is being sold: a tiny "Skip" beside "Next" in a
@@ -546,6 +551,16 @@
 
   /** The smallest element whose text matches -- its own words, not a run of
    *  neighbouring text glued together by innerText. */
+  function smallestMatchingElement(re) {
+    let best = null;
+    for (const el of document.querySelectorAll("p, span, div, b, strong, li, small, em, h1, h2, h3, h4, label")) {
+      const f = fast(el);
+      if (!f || f.length > 200 || !re.test(f) || !isVisible(el)) continue;
+      if (!best || f.length < best.len) best = { el, len: f.length };
+    }
+    return best ? best.el : null;
+  }
+
   function smallestMatching(re) {
     let best = null;
     for (const el of document.querySelectorAll("p, span, div, b, strong, li, small, em, h1, h2, h3, h4, label")) {
@@ -582,7 +597,7 @@
       if (el.children.length > 6) continue;
       const f = fast(el);
       if (f.length < 5 || f.length > 200) continue;
-      const name = f.replace(/(-|\u2212)?\s*(\u20b9|rs\.?|inr)\s*[\d,.]+/gi, " ");
+      const name = f.replace(/(-|\u2212)?\s*(\u20b9|(?<![A-Za-z])(?:rs\.?|inr))\s*[\d,.]+/gi, " ");
       const sim = C.similarity(C.fingerprint(name), fp);
       const coverage = sim.shared / Math.max(1, new Set(fp).size);
       if (sim.shared < 3 || coverage < 0.6) continue;
@@ -766,19 +781,30 @@
   // -------------------------------------------------- DP-13 Rogue Malware
   function rogueFindings() {
     const body = fast(document.body).slice(0, 30000);
-    const scare = body.match(C.SCARE_RE);
-    if (!scare) return [];
-    const ctas = [...document.querySelectorAll(CLICKABLE)].filter((el) => {
-      const f = fast(el);
-      return f && f.length <= 40 && C.SCARE_CTA_RE.test(f) && isVisible(el);
-    });
-    const exe = [...document.querySelectorAll("a[href]")].find((a) => C.EXECUTABLE_RE.test(a.getAttribute("href") || ""));
+    if (!C.SCARE_RE.test(body)) return [];
+    // The scare text and the action it pushes must be in the SAME box (the
+    // pop-up or card), not merely somewhere on the page: an article that
+    // mentions "virus detected" plus any Download button elsewhere is not
+    // a rogue alert.
+    const scareEl = smallestMatchingElement(C.SCARE_RE);
+    if (!scareEl) return [];
+    let box = scareEl, ctas = [], exe = null;
+    for (let i = 0; box && box !== document.body && i < 4; i++, box = box.parentElement) {
+      ctas = [...box.querySelectorAll(CLICKABLE)].filter((el) => {
+        const f = fast(el);
+        return f && f.length <= 40 && C.SCARE_CTA_RE.test(f) && isVisible(el);
+      });
+      exe = [...box.querySelectorAll("a[href]")].find((a) => C.EXECUTABLE_RE.test(a.getAttribute("href") || ""));
+      if (ctas.length || exe) break;
+    }
     if (!ctas.length && !exe) return [];
-    const ev = { warning_text: C.clip(C.redact(smallestMatching(C.SCARE_RE) || scare[0]), 100),
+    const ev = { warning_text: C.clip(C.redact(textOf(scareEl)), 100),
                  action_offered: ctas.length ? C.clip(clickableText(ctas[0]), 40) : "a download link" };
     if (exe) ev.executable_link = C.clip((exe.getAttribute("href") || "").split("?")[0].split("/").pop(), 60);
     return [{
-      code: "DP-13", tier: "corroborated",
+      // Indicative, never higher: this judges presentation only. Nothing is
+      // downloaded or analysed (the same cap the server applies to DP-13).
+      code: "DP-13", tier: "indicative",
       title: "A scare message pushes you to download or call",
       detail: `"${ev.warning_text}" next to "${ev.action_offered}". Ulterior judges the presentation only; it never ` +
         "opens or downloads a file.",

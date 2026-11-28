@@ -33,6 +33,7 @@ gets no partial credit.
 """
 
 import json
+import logging
 import os
 import re
 from typing import List, Optional
@@ -68,6 +69,8 @@ Return an empty "violations" list if neither pattern is present. Do not include 
 
 # --- DP-03 Confirm Shaming, offline --------------------------------------
 
+logger = logging.getLogger(__name__)
+
 GUILT_PATTERNS = [
     r"\bi don'?t (like|want|need|care about|mind|hate|despise)\b",
     r"\bi'?d?\s*(rather|prefer)\s*(to\s*)?(not\s+)?(pay|have|save|win)\b",
@@ -82,7 +85,8 @@ GUILT_PATTERNS = [
     r"don'?t (mind )?miss(ing)? out",
     r"don'?t want \d+%",
     r"'?d like \d+% off",
-    r"not interested\b",
+    # "No, not interested" is the neutral way to decline and is not guilt;
+    # the extension already left it out.
     r"\bhate (saving|cool)\b",
     r"i'?ve got too much\b",
 ]
@@ -263,13 +267,24 @@ def _call_anthropic(button_texts: List[str]) -> dict:
                    "content": "Button/link texts on this page:\n"
                               + "\n".join(f"- {t}" for t in safe_texts)}],
     )
-    return json.loads(resp.content[0].text.strip())
+    return _parse_model_json(resp.content[0].text)
+
+
+def _parse_model_json(text: str) -> dict:
+    """The model sometimes wraps its JSON in ```json fences or adds a line
+    around it. Read the first {...} object rather than failing silently."""
+    t = (text or "").strip()
+    t = re.sub(r"^```(?:json)?\s*|\s*```$", "", t, flags=re.IGNORECASE).strip()
+    start, end = t.find("{"), t.rfind("}")
+    if start == -1 or end <= start:
+        raise ValueError("no JSON object in the model reply")
+    return json.loads(t[start:end + 1])
 
 
 def detect_language_patterns(trace: FunnelTrace, use_llm: bool = False) -> List[Violation]:
     """Offline detectors always run; the LLM pass only adds to them."""
     violations: List[Violation] = []
-    llm_available = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    llm_available = bool((os.environ.get("ANTHROPIC_API_KEY") or "").strip())
     llm_requested = bool(use_llm)
 
     for state in trace.states:
@@ -284,10 +299,12 @@ def detect_language_patterns(trace: FunnelTrace, use_llm: bool = False) -> List[
                 for item in extra:
                     sources[id(item)] = "anthropic_api"
                 candidates += extra
-            except Exception:
+            except Exception as exc:
                 # A failed API call must never fail the audit -- the offline
-                # findings above are already valid on their own.
-                pass
+                # findings above are already valid on their own -- but it is
+                # logged, so "the LLM found nothing" and "the LLM never ran"
+                # can be told apart.
+                logger.warning("Layer 3 LLM pass failed at step %s: %s", state.step_name, type(exc).__name__)
 
         seen = set()
         for candidate in candidates:

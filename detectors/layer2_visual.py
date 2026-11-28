@@ -17,15 +17,31 @@ LOW_CONTRAST_THRESHOLD = 3.0   # WCAG AA minimum for large text is 3:1; below th
 SIZE_RATIO_THRESHOLD = 2.0     # accept button >2x the area of decline button
 
 
+def _distance(a, b) -> float:
+    if not a.bbox or not b.bbox:
+        return float("inf")
+    ax, ay = a.bbox["x"] + a.bbox["width"] / 2, a.bbox["y"] + a.bbox["height"] / 2
+    bx, by = b.bbox["x"] + b.bbox["width"] / 2, b.bbox["y"] + b.bbox["height"] / 2
+    return ((ax - bx) ** 2 + (ay - by) ** 2) ** 0.5
+
+
 def detect_interface_interference(trace: FunnelTrace) -> List[Violation]:
     violations = []
     for state in trace.states:
-        accepts = [b for b in state.buttons if b.role == "accept"]
         declines = [b for b in state.buttons if b.role == "decline"]
-        if not accepts or not declines:
+        if not declines:
             continue
-
-        accept, decline = accepts[0], declines[0]
+        decline = declines[0]
+        # The accept option is the control NEXT TO the decline: an explicitly
+        # marked accept if there is one, else the nearest other button. Using
+        # the first "accept" on the page compared the decline with whatever
+        # button happened to come first (often "Add to cart" in the header).
+        others = [b for b in state.buttons if b is not decline and b.role != "decline"]
+        marked = [b for b in others if b.role == "accept"]
+        pool = marked or others
+        if not pool:
+            continue
+        accept = min(pool, key=lambda b: _distance(b, decline))
 
         reasons = []
         if decline.contrast_ratio < LOW_CONTRAST_THRESHOLD:

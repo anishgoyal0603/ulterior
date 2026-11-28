@@ -21,6 +21,9 @@ logger = logging.getLogger("ulterior.worker")
 
 def main(poll_seconds: float = 3.0) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # The same fail-fast checks as the API: a worker must not run against
+    # SQLite, an unencrypted database, or without keys in production.
+    config.validate()
     init_db()
     stop = threading.Event()
     signal.signal(signal.SIGINT, lambda *_: stop.set())
@@ -36,7 +39,11 @@ def main(poll_seconds: float = 3.0) -> None:
         except Exception:
             logger.exception("Worker sweep failed")
         stop.wait(poll_seconds)
-    logger.info("Audit worker stopping")
+    # Let audits already running finish and close their browsers, instead of
+    # killing Chromium mid-page. (Queued jobs stay queued for the next worker.)
+    logger.info("Audit worker stopping: waiting for running audits to finish")
+    from . import tasks
+    tasks._executor.shutdown(wait=True, cancel_futures=True)
     time.sleep(0.2)
 
 

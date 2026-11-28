@@ -3,6 +3,7 @@ Example adapter: a flight-booking funnel (different shape from e-commerce:
 search -> results -> seats -> addons -> payment). Demonstrates the adapter
 pattern generalizes beyond retail without touching the detection engine.
 """
+from pathlib import Path
 import os
 from .base import SiteAdapter, FunnelStep
 
@@ -10,7 +11,7 @@ _FIXTURE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "fixtures", "
 
 
 def _f(name):
-    return "file://" + os.path.abspath(os.path.join(_FIXTURE_DIR, name))
+    return Path(os.path.join(_FIXTURE_DIR, name)).resolve().as_uri()
 
 
 FLIGHT_DARK_DEMO = SiteAdapter(

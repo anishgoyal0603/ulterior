@@ -150,11 +150,17 @@
       const input = el("input");
       input.type = "number";
       input.min = "1";
-      input.value = String(C.suggestTarget(price.current));
+      // The page re-renders this panel whenever it changes. Keep what the
+      // shopper is typing (and the cursor in the box) instead of resetting it.
+      input.value = typed ? typed.value : String(C.suggestTarget(price.current));
       input.setAttribute("aria-label", "Target price in rupees");
+      input.addEventListener("input", () => { typed = { value: input.value, focused: true }; });
+      input.addEventListener("blur", () => { if (typed) typed.focused = false; });
+      if (typed && typed.focused) refocus = input;
       const watch = el("button", "btn primary", "Watch price");
       watch.addEventListener("click", () => {
         const t = parseFloat(input.value);
+        typed = null;
         if (t > 0 && opts.onWatch) opts.onWatch(t);
       });
       row.append(el("span", "d", "Tell me at \u20b9"), input, watch);
@@ -168,6 +174,9 @@
    * not to see it on this site again this session. opts.price: the price
    * check for a product page (shown even with no findings).
    */
+  let typed = null;      // {value, focused}: the target price being typed
+  let refocus = null;
+
   function render(findings, site, opts) {
     opts = opts || {};
     findings = findings || [];
@@ -191,6 +200,7 @@
     host.setAttribute("data-count", String(findings.length));
     host.setAttribute("data-mode", findings.length ? "findings" : "price");
     host.setAttribute("data-verdict", price ? price.verdict.kind : "");
+    refocus = null;
     shadow.replaceChildren();
     if (useStyles) shadow.append(el("style", "", useStyles));
 
@@ -247,6 +257,7 @@
 
     wrap.append(panel, pill);
     shadow.append(wrap);
+    if (refocus) { try { refocus.focus(); } catch (e) { /* not focusable yet */ } }
   }
 
   root.UlteriorOverlay = { render, remove };

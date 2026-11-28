@@ -8,6 +8,7 @@ confidence interval, no argument possible in a legal dispute.
 from dataclasses import dataclass, field
 from typing import List, Optional
 import re
+from types import SimpleNamespace
 
 from .taxonomy import BY_CODE, PROVABLE, CORROBORATED, INDICATIVE, clamp_confidence
 from .vocab import is_recurring_label
@@ -36,9 +37,31 @@ def _mentions_amount(text: str, amount: float) -> bool:
     if not text or not amount:
         return False
     whole = int(round(amount))
-    variants = {str(whole), f"{whole:,}", f"{amount:.2f}", f"{whole:,}.00"}
-    haystack = re.sub(r"[\s\u00a0]", "", text)
-    return any(re.sub(r"[\s\u00a0]", "", v) in haystack for v in variants)
+    variants = sorted({str(whole), f"{whole:,}", f"{amount:.2f}", f"{whole:,}.00",
+                       _indian_grouping(whole)}, key=len, reverse=True)
+    haystack = text.replace("\u00a0", " ")
+    number = "|".join(re.escape(v) for v in variants)
+    # As a PRICE: with a currency mark before it (or "/-" after it), and not
+    # part of a longer number. A bare substring test let "4,570 reviews", a
+    # PIN code or a phone number "disclose" a total of 457.
+    pattern = (rf"(?:[₹$€£]|\b(?:rs\.?|inr|usd|eur|gbp)\b)\s*(?:{number})(?![\d]|[.,]\d)"
+               rf"|(?<![\d.,])(?:{number})\s*/-")
+    return re.search(pattern, haystack, re.IGNORECASE) is not None
+
+
+def _indian_grouping(n: int) -> str:
+    """1234567 -> 12,34,567 (how Indian shops write it)."""
+    s = str(n)
+    if len(s) <= 3:
+        return s
+    head, tail = s[:-3], s[-3:]
+    parts = []
+    while len(head) > 2:
+        parts.insert(0, head[-2:])
+        head = head[:-2]
+    if head:
+        parts.insert(0, head)
+    return ",".join(parts + [tail])
 
 
 # The largest number of rows that can plausibly be ONE order's fee
@@ -51,6 +74,15 @@ _STATES_A_TOTAL = re.compile(
     r"you pay|payable|order summary|amount to pay)\b", re.IGNORECASE)
 
 
+# "Subtotal" is the price before fees. Taking it as the total made DP-08 blind
+# to exactly the checkouts it exists for: Subtotal ₹299, Delivery ₹49,
+# Total ₹348 -> "total" 299, no difference, no finding.
+_SUBTOTAL = re.compile(r"\b(sub[\s-]?total|item(s)? total|cart total|bag total)\b", re.IGNORECASE)
+_FINAL_TOTAL = re.compile(
+    r"\b(grand total|order total|total amount|total payable|amount payable|net payable|"
+    r"you pay|to pay|payable|total)\b", re.IGNORECASE)
+
+
 def _stated_total(state: "PageState") -> Optional[float]:
     """The figure the page itself puts next to the word "total".
 
@@ -60,12 +92,29 @@ def _stated_total(state: "PageState") -> Optional[float]:
     the crawler's inference, and inferences are what produced a PROVABLE
     accusation built from a shipping banner and a product shelf.
     """
-    for line in (state.full_text or "").splitlines():
-        if _STATES_A_TOTAL.search(line):
-            amount = parse_money(line)
-            if amount:
-                return amount
-    return None
+    lines = [ln.strip() for ln in (state.full_text or "").splitlines() if ln.strip()]
+    final = sub = None
+    for i, line in enumerate(lines):
+        is_sub = bool(_SUBTOTAL.search(line))
+        if not is_sub and not _FINAL_TOTAL.search(line):
+            continue
+        amount = parse_money(line)
+        if not amount and i + 1 < len(lines) and not _STATES_A_TOTAL.search(lines[i + 1]):
+            # <div><span>Total</span><span>₹457</span></div> renders as two
+            # lines: the label on one, the amount on the next.
+            amount = parse_money(lines[i + 1])
+        if not amount:
+            continue
+        # Keep going: the LAST total on the page is the payable one.
+        if is_sub:
+            sub = amount
+        else:
+            final = amount
+    # A subtotal is never preferred to a real total ("Subtotal ₹299 ... Total
+    # ₹457" is a ₹457 order). But a cart drawer that states ONLY a subtotal
+    # is still the shop's own figure for the basket, and better than a
+    # number the crawler picked off the page.
+    return final if final is not None else sub
 
 
 def _is_an_order_breakdown(first: "PageState", last: "PageState") -> bool:
@@ -98,6 +147,24 @@ def _is_an_order_breakdown(first: "PageState", last: "PageState") -> bool:
     if first_names and first_names == last_names:
         return False
     return True
+
+
+def _named_as_a_charge(name: str, text: str) -> bool:
+    """Was this fee named on the first page as something the shopper pays?
+
+    Whole words only, and a mention preceded by "free" / "no" does not count:
+    "Free 2-day delivery" on the product page does not disclose a ₹49
+    "Delivery" charge at checkout -- it says the opposite."""
+    name = (name or "").strip().lower()
+    if not name or not text:
+        return False
+    lowered = text.lower()
+    for m in re.finditer(rf"(?<![a-z0-9]){re.escape(name)}(?![a-z0-9])", lowered):
+        before = lowered[max(0, m.start() - 25):m.start()]
+        if re.search(r"\b(free|no|zero|waived)\b[^.\n]*$", before):
+            continue
+        return True
+    return False
 
 
 def detect_drip_pricing(trace: FunnelTrace) -> List[Violation]:
@@ -158,7 +225,7 @@ def detect_drip_pricing(trace: FunnelTrace) -> List[Violation]:
         # checkout would make every figure in the finding suspect.
         cur = last.price_currency or first.price_currency or ""
         undisclosed = [li for li in last.line_items if li["name"] not in ("", None)
-                        and li["price"] > 0 and li["name"].lower() not in first.full_text.lower()]
+                        and li["price"] > 0 and not _named_as_a_charge(li["name"], first.full_text)]
 
         # DP-08 is about charges the shop did NOT disclose up front -- that is
         # what "drip" means. The list above already works out which additions
@@ -287,22 +354,34 @@ def detect_fake_urgency(trace: FunnelTrace) -> List[Violation]:
     for step_name, (first, second) in trace.reload_pairs.items():
         if not first.urgency_phrases_found:
             continue
+        first_text = _straight_quotes(first.full_text)
+        second_text = _straight_quotes(second.full_text)
 
-        first_value = " ".join(sorted(set(
-            v for v in (_extract_urgent_value(first.full_text, p)
-                        for p in first.urgency_phrases_found) if v
-        )))
-        second_value = " ".join(sorted(set(
-            v for v in (_extract_urgent_value(second.full_text, p)
-                        for p in second.urgency_phrases_found) if v
-        )))
+        # Each claim is compared with ITSELF across the reload. Joining every
+        # value into one string ("00:04:59 2") made the clock unparseable and
+        # silently dropped every finding on a page with a timer AND a stock
+        # count -- the commonest combination there is.
+        clocks, counts = [], []
+        for p in first.urgency_phrases_found:
+            v1 = _extract_urgent_value(first_text, p)
+            if not v1:
+                continue
+            v2 = _extract_urgent_value(second_text, p)
+            (clocks if ":" in v1 else counts).append((p, v1, v2))
 
-        # No value at all -> the page made a mood claim, not a factual one.
-        # There is nothing to prove stale.
-        if not first_value:
+        kind, first_value, second_value = "", "", ""
+        for p, v1, v2 in clocks:
+            s1, s2 = _clock_to_seconds(v1), _clock_to_seconds(v2)
+            if s1 is not None and s2 is not None and s2 >= s1:
+                kind, first_value, second_value = "countdown", v1, v2
+                break
+        if not kind:
+            for p, v1, v2 in counts:
+                if v2 and v1 == v2:
+                    kind, first_value, second_value = "count", v1, v2
+                    break
+        if not kind:
             continue
-
-        kind = _urgency_value_kind(first.full_text, first.urgency_phrases_found)
 
         if kind == "countdown":
             # Do NOT require the two clocks to be byte-identical. A fake timer
@@ -315,14 +394,7 @@ def detect_fake_urgency(trace: FunnelTrace) -> List[Violation]:
             # The real question is simpler and timing-proof: a genuine
             # countdown must have gone DOWN over real elapsed time. One that
             # did not has no deadline behind it.
-            first_seconds = _clock_to_seconds(first_value)
-            second_seconds = _clock_to_seconds(second_value)
-            if first_seconds is None or second_seconds is None:
-                continue
-            if second_seconds < first_seconds:
-                continue  # it really is counting down -- honest
-        elif first_value != second_value:
-            continue      # the quantity moved, so it is not a stale claim
+            pass          # established above: it did not go down
 
         if kind == "countdown":
             tier, confidence = CORROBORATED, 1.0
@@ -368,9 +440,16 @@ _CLOCK_RE = re.compile(r"\b\d{1,3}\s*:\s*\d{2}(?:\s*:\s*\d{2})?\b")
 _COUNT_RE = re.compile(r"\b\d{1,6}\b")
 
 
+def _straight_quotes(text: str) -> str:
+    """The urgency patterns were matched on text with curly quotes made
+    straight; values must be read from the same text, or "Don’t miss out"
+    matches and then yields nothing."""
+    return (text or "").replace("\u2019", "'").replace("\u2018", "'")
+
+
 def _clock_to_seconds(value: str):
     """'00:04:59' -> 299. Returns None if it is not a clock."""
-    parts = value.split(":")
+    parts = (value or "").strip().split(":")
     if not 2 <= len(parts) <= 3:
         return None
     try:
@@ -495,8 +574,12 @@ def detect_reference_pricing(trace: FunnelTrace) -> List[Violation]:
     violations = []
     for state in trace.states:
         # look for a strikethrough/"was" price and a "now" price on the same page
-        was_matches = re.findall(r"(?:was|mrp|original)[:\s]*[₹$]?\s?([\d,]+(?:\.\d+)?)",
-                                  state.full_text, re.IGNORECASE)
+        # Whole words, and the figure must be written as money: "canvas: 2000"
+        # or "was 2000 employees" are not reference prices.
+        was_matches = re.findall(
+            r"\b(?:was|mrp|m\.r\.p\.?|original price|list price)\b[:\s]*"
+            r"(?:[₹$€£]|\brs\.?|\binr\b)\s?([\d,]+(?:\.\d+)?)",
+            state.full_text, re.IGNORECASE)
         now_price = state.price
         if was_matches and now_price:
             try:
@@ -566,18 +649,30 @@ def detect_price_comparison_prevention(trace: FunnelTrace) -> List[Violation]:
     """
     violations = []
     for state in trace.states:
-        if "user-select: none" in state.raw_html.lower() or "user-select:none" in state.raw_html.lower():
-            if "oncontextmenu" in state.raw_html.lower() or "user-select" in state.raw_html.lower():
-                violations.append(Violation(
-                    pattern_code="DPAF-OB-PC", pattern_name="Price Comparison Prevention (beyond CCPA-13)",
-                    step_name=state.step_name,
-                    confidence=clamp_confidence(INDICATIVE, 0.35),
-                    evidence={"evidence_tier": INDICATIVE, "css_or_js_blocking_selection": True},
-                    layer=1,
-                    explanation=("Page CSS/JS disables text selection or right-click, which can "
-                                  "prevent a shopper from copying the product name/price to "
-                                  "compare prices on another site."),
-                ))
+        html = (state.raw_html or "").lower()
+        # The old test was "user-select: none" anywhere AND "user-select"
+        # anywhere -- always true together, so every page that styles a
+        # button or a toggle as unselectable (very common) was reported. Only
+        # a block that targets the PRICE or PRODUCT NAME, or a page-wide
+        # right-click block, is what this pattern describes.
+        targets_price = re.search(
+            r"(?:class|id)\s*=\s*[\"'][^\"']*(?:price|product[-_ ]?(?:name|title))[^\"']*[\"'][^>]*"
+            r"style\s*=\s*[\"'][^\"']*user-select\s*:\s*none"
+            r"|\.(?:[\w-]*price[\w-]*|product[-_]?(?:name|title))[^{]*\{[^}]*user-select\s*:\s*none", html)
+        blocks_context_menu = re.search(
+            r"<body[^>]*oncontextmenu\s*=\s*[\"']\s*return\s+false"
+            r"|document\.oncontextmenu\s*=|addEventListener\(\s*[\"']contextmenu[\"'][^)]*preventdefault", html)
+        if targets_price or blocks_context_menu:
+            violations.append(Violation(
+                pattern_code="DPAF-OB-PC", pattern_name="Price Comparison Prevention (beyond CCPA-13)",
+                step_name=state.step_name,
+                confidence=clamp_confidence(INDICATIVE, 0.35),
+                evidence={"evidence_tier": INDICATIVE, "css_or_js_blocking_selection": True},
+                layer=1,
+                explanation=("Page CSS/JS disables text selection or right-click, which can "
+                              "prevent a shopper from copying the product name/price to "
+                              "compare prices on another site."),
+            ))
     return violations
 
 
@@ -599,10 +694,20 @@ def detect_bait_and_switch(trace: FunnelTrace) -> List[Violation]:
     violations = []
     for i in range(len(trace.states) - 1):
         current, nxt = trace.states[i], trace.states[i + 1]
-        for btn in current.buttons:
-            claimed_prices = re.findall(r"[₹$]\s?([\d,]+(?:\.\d+)?)", btn.text)
-            if not claimed_prices:
+        controls = list(current.buttons) + [
+            SimpleNamespace(text=getattr(link, "text", "") or "") for link in (current.links or [])]
+        for btn in controls:
+            text = btn.text or ""
+            # "Save ₹500 on orders above ₹4,999" promises a discount on a
+            # condition, not a price; comparing ₹500 with the next page's
+            # price was a false accusation.
+            if re.search(r"\b(save|off|cashback|discount|above|over|min(imum)?|upto|up to|from)\b",
+                         text, re.IGNORECASE):
                 continue
+            claimed_prices = re.findall(
+                r"(?:[₹$€£]|\brs\.?|\binr\b)\s?([\d,]+(?:\.\d+)?)", text, re.IGNORECASE)
+            if len(claimed_prices) != 1:
+                continue      # no price, or several: not one checkable promise
             try:
                 claimed = float(claimed_prices[0].replace(",", ""))
             except ValueError:

@@ -78,13 +78,13 @@ ext.runtime.onMessage.addListener((msg, sender, reply) => {
   }
 
   if (msg.type === "COMMUNITY_GET" && sender.tab) {
-    if (!keyBelongsToSender(msg.key, sender)) { reply({ ok: false }); return false; }
+    if (!keyBelongsToSender(msg.key, sender) || !communitySite(msg.key)) { reply({ ok: false }); return false; }
     communityHistory(msg.key).then((series) => reply(series ? { ok: true, series } : { ok: false }));
     return true;
   }
 
   if (msg.type === "COMMUNITY_PUT" && sender.tab) {
-    if (keyBelongsToSender(msg.key, sender) && msg.price > 0) communityPut(msg.key, msg.price);
+    if (keyBelongsToSender(msg.key, sender) && communitySite(msg.key) && msg.price > 0) communityPut(msg.key, msg.price);
     return false;
   }
 
@@ -127,6 +127,15 @@ function isExtensionPage(sender) {
 function keyBelongsToSender(key, sender) {
   if (typeof key !== "string" || key.length > 230) return false;
   return key.split(":")[0] === senderSite(sender);
+}
+
+// Community prices are for the listed shops only. "Scan this page" can run
+// on ANY site (a company portal, a staging store); its product ids must
+// never be sent anywhere, even though the server would refuse them.
+const COMMUNITY_DEV_SITES = ["127.0.0.1", "localhost"];
+function communitySite(key) {
+  const site = String(key || "").split(":")[0];
+  return C.SUPPORTED_SITES.includes(site) || COMMUNITY_DEV_SITES.includes(site);
 }
 
 // ---------------------------------------------------- community prices
@@ -172,7 +181,9 @@ async function communityPut(key, price) {
 
 // --------------------------------------------------------- price alerts
 async function priceAlert(a) {
-  const id = "drop-" + Date.now();
+  // Unique per alert: two drops in the same millisecond used to share an id,
+  // so the second notification replaced the first and its link.
+  const id = `drop-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const title = `Price drop: ${C.formatINR(a.price)}`;
   const message = `${C.clip(a.title || a.key, 90)} is at or under your target of ${C.formatINR(a.target)}` +
     (a.source === "community" ? " (seen by the community)." : ".");
@@ -195,7 +206,8 @@ ext.notifications.onClicked.addListener(async (id) => {
 /** Every six hours: ask the community prices for everything you watch. */
 async function runWatchCheck() {
   if (!(await communityOn())) return { checked: 0 };
-  const items = await Watch.list();
+  // Watched items from unlisted sites stay on this device only.
+  const items = (await Watch.list()).filter((i) => communitySite(i.key));
   if (!items.length) return { checked: 0 };
   let latest;
   try { latest = await communityFetch(C.COMMUNITY_PATHS.latest, { keys: items.map((i) => i.key).slice(0, 100) }); }

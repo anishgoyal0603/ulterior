@@ -286,16 +286,23 @@ def _state(**kw):
 
 def test_coverage_never_reads_silence_as_clean():
     from detectors.coverage import assess_coverage
-    one_product_page = SimpleNamespace(states=[_state(price=299.0, buttons=[1, 2])], reload_pairs={},
+    # Two buttons with no decline among them: DP-06 (and DP-03) had nothing to
+    # judge, so they are "not assessed" -- not a clean bill of health.
+    plain = [SimpleNamespace(role="neutral"), SimpleNamespace(role="primary")]
+    one_product_page = SimpleNamespace(states=[_state(price=299.0, buttons=plain)], reload_pairs={},
                                        step_roles={})
     cov = {c["code"]: c for c in assess_coverage(one_product_page, [])}
     assert cov["DP-08"]["status"] == "not_assessed" and "checkout" in cov["DP-08"]["note"]
     assert cov["DP-02"]["status"] == "not_assessed"
     assert cov["DP-01"]["status"] == "not_assessed"
-    assert cov["DP-06"]["status"] == "not_observed"
+    assert cov["DP-06"]["status"] == "not_assessed"
+    with_decline = [SimpleNamespace(role="primary"), SimpleNamespace(role="decline")]
+    page2 = SimpleNamespace(states=[_state(price=299.0, buttons=with_decline)], reload_pairs={}, step_roles={})
+    cov2 = {c["code"]: c for c in assess_coverage(page2, [])}
+    assert cov2["DP-06"]["status"] == "not_observed"
     assert cov["DP-09"]["status"] == "partially_assessed"
 
-    walk = SimpleNamespace(states=[_state(price=299.0, buttons=[1, 2]),
+    walk = SimpleNamespace(states=[_state(price=299.0, buttons=with_decline),
                                    _state(checkboxes=[1], line_items=[{"name": "x", "price": 1}])],
                            reload_pairs={"product": 1}, step_roles={})
     cov = {c["code"]: c for c in assess_coverage(walk, ["DP-08"])}

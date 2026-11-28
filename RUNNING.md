@@ -237,7 +237,7 @@ Stop the server first (**Ctrl+C**), then:
 Expect:
 
 ```
-379 passed, 90 deselected, 1 warning
+405 passed, 90 deselected, 1 warning
 ```
 
 ### Reading that line
@@ -246,7 +246,7 @@ Expect:
 that command doing exactly what you asked. `-m "not ui"` means *skip the tests
 marked `ui`* — the 90 browser tests that launch a real server and drive a real
 Chromium window. pytest is reporting how many it set aside on your
-instruction. Drop the flag and all 469 run.
+instruction. Drop the flag and all 495 run.
 
 **`1 warning` is also fine.** It comes from inside Starlette's own code, not
 this project. Ours are at zero and a test keeps them there.
@@ -370,7 +370,7 @@ English, Hindi and Hinglish.
 
 1. `.\.venv\Scripts\python.exe scripts\package_extension.py`
 2. Open `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on** → pick
-   `dist\ulterior-extension-2.1.0-firefox.zip`.
+   `dist\ulterior-extension-2.2.0-firefox.zip`.
 3. Firefox asks for site access on first use: allow it for the shopping sites.
    (A temporary add-on is removed when Firefox closes; a permanent install comes
    from addons.mozilla.org once it is listed.)
@@ -447,8 +447,8 @@ extension users** (API key needed) — check each one before repeating it.
 ```
 
 It checks the manifest, version and the network rule, then writes
-`dist\ulterior-extension-2.1.0-chrome-edge.zip` (Chrome Web Store and Edge
-Add-ons) and `dist\ulterior-extension-2.1.0-firefox.zip` (Firefox Add-ons).
+`dist\ulterior-extension-2.2.0-chrome-edge.zip` (Chrome Web Store and Edge
+Add-ons) and `dist\ulterior-extension-2.2.0-firefox.zip` (Firefox Add-ons).
 Everything the stores' forms ask for is in `extension\STORE_LISTING.md`; the
 screenshots are in `docs\store\`.
 

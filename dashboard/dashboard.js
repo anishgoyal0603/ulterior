@@ -44,6 +44,8 @@ function apiKey() {
  * boot() and the run buttons tell "locked" apart from "the server is down".
  */
 class AuthError extends Error {}
+/** The key is valid but this part is not for its organisation (403). */
+class ForbiddenError extends Error {}
 
 /*
  * "unknown" until the first protected call answers; then "open" (local
@@ -116,6 +118,13 @@ async function authFetch(path, options) {
     }
   }
 
+  // 403 is NOT a bad key: a customer organisation's key is valid but may
+  // not read the team's own panels (extension reports). Treating it as 401
+  // locked the whole dashboard and told a paying customer "That key was not
+  // accepted".
+  if (r.status === 403 && key) {
+    throw new ForbiddenError("This part of the dashboard is not available for your organisation.");
+  }
   if (r.status === 401 || r.status === 403) {
     // Record which kind of locked this is, so every panel agrees.
     setAuthState(key ? "bad" : "locked");
@@ -185,10 +194,12 @@ async function loadAdapters() {
  * has to restore the page, not just the button that happened to start it.
  */
 let runningJobId = null;
+let stopRequested = false;
 function endAuditRun() {
   clearInterval(pollTimer);
   pollTimer = null;
   runningJobId = null;
+  stopRequested = false;
   document.getElementById("cancel-audit").hidden = true;
   ["run-audit", "run-urls"].forEach((id) => {
     const el = document.getElementById(id);
@@ -279,7 +290,11 @@ async function startAudit(payload, btn) {
       return;
     }
 
-    status.textContent = j.status === "pending"
+    // Once Stop was pressed, keep saying so: the next poll used to overwrite
+    // "Stopping..." with "Running..." a second later.
+    status.textContent = stopRequested
+      ? `Stopping\u2026 ${secs}s \u2014 the browser finishes its current page first.`
+      : j.status === "pending"
       ? `Queued\u2026 ${secs}s \u2014 waiting for a free browser.`
       : `Running\u2026 ${secs}s \u2014 a real browser is walking the site (usually 20\u201390 s).`;
     status.classList.remove("is-error");
@@ -471,6 +486,7 @@ async function cancelRunningAudit() {
   if (!runningJobId) return;
   const status = document.getElementById("run-status");
   try {
+    stopRequested = true;
     const r = await authFetch(`/audits/${Number(runningJobId)}/cancel`, {method: "POST"});
     status.textContent = r.status === "cancelled" ? "Cancelled." : "Stopping\u2026 the browser finishes its current page first.";
   } catch (err) {
@@ -865,7 +881,15 @@ async function downloadReport() {
  *  someone visited and then from an unauthenticated POST, so every one goes
  *  in as text. */
 async function loadReports() {
-  const rows = await authFetch("/extension-reports?limit=50");
+  const card = document.getElementById("reports-card");
+  let rows;
+  try {
+    rows = await authFetch("/extension-reports?limit=50");
+  } catch (err) {
+    if (err instanceof ForbiddenError) { card.hidden = true; return; }   // team-only panel
+    throw err;
+  }
+  card.hidden = false;
   const tbody = document.getElementById("reports-table");
   tbody.replaceChildren();
   document.getElementById("reports-count").textContent =

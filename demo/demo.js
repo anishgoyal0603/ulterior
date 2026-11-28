@@ -181,7 +181,7 @@ async function runAudit() {
       const seconds = Math.round((Date.now() - started) / 1000);
       if (job.status === "running") setStatus(`Walking the funnel\u2026 ${seconds}s`, false);
 
-      if (job.status === "done" || job.status === "failed") {
+      if (job.status === "done" || job.status === "failed" || job.status === "cancelled") {
         clearInterval(poll);
         setRunning(false);
         // Show WHAT failed, not just that it did. error_message already

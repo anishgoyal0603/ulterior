@@ -4,6 +4,7 @@ This is the TEMPLATE for onboarding any real e-commerce site — swap the
 file:// paths for real https:// URLs and adjust wait_for_selector if the
 site is JS-heavy (e.g. React SPA cart that renders after an XHR).
 """
+from pathlib import Path
 import os
 from .base import SiteAdapter, FunnelStep
 
@@ -11,7 +12,7 @@ _FIXTURE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "fixtures", "
 
 
 def _f(name):
-    return "file://" + os.path.abspath(os.path.join(_FIXTURE_DIR, name))
+    return Path(os.path.join(_FIXTURE_DIR, name)).resolve().as_uri()
 
 
 ECOMMERCE_DARK_DEMO = SiteAdapter(

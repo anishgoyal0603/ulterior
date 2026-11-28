@@ -13,6 +13,7 @@ path from page content, and guessing would produce exactly the sort of
 unfounded finding this project refuses to emit — so the adapter states it,
 and an adapter that states nothing simply gets no asymmetry finding.
 """
+from pathlib import Path
 import os
 from .base import SiteAdapter, FunnelStep
 
@@ -20,7 +21,7 @@ _FIXTURES = os.path.join(os.path.dirname(__file__), "..", "..", "fixtures")
 
 
 def _f(folder, name):
-    return "file://" + os.path.abspath(os.path.join(_FIXTURES, folder, name))
+    return Path(os.path.join(_FIXTURES, folder, name)).resolve().as_uri()
 
 
 FORCED_ACTION_DEMO = SiteAdapter(

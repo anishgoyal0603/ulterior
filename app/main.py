@@ -211,7 +211,8 @@ def _visible(query, caller: Caller):
     if caller.admin:
         return query
     if caller.org == config.DEFAULT_ORG:
-        return query.filter((models.AuditJob.org == caller.org) | models.AuditJob.org.is_(None))
+        return query.filter((models.AuditJob.org == caller.org) | models.AuditJob.org.is_(None)
+                            | (models.AuditJob.org == config.DEMO_ORG))
     return query.filter(models.AuditJob.org == caller.org)
 
 
@@ -643,23 +644,48 @@ def price_drops(payload: schemas.PriceDropsIn, db: Session = Depends(get_db)):
         hit = _drops_cache.get(payload.days)
         if hit and _time.monotonic() - hit[0] < 60:
             return {"drops": hit[1][:payload.limit]}
-    rows = (db.query(models.PriceObservation.product_key, models.PriceObservation.observed_on,
-                     models.PriceObservation.price)
-            .filter(models.PriceObservation.observed_on >= community.window_start(payload.days))
-            .order_by(models.PriceObservation.observed_on.desc())
-            .limit(100000).all())
-    per = {}
-    for k, d, p in rows:
-        per.setdefault(k, []).append((d, p))
+    from sqlalchemy import func
+    PO = models.PriceObservation
+    since = community.window_start(payload.days)
+    # Step 1, in SQL: how many reports each product has on each day. This is
+    # one small row per (product, day) however many reports there are, so no
+    # row cap is needed and no product loses its older days -- which is what
+    # the old "newest 100,000 rows" query did on a busy window, silently
+    # moving each product's starting day forward and hiding real drops.
+    counts = (db.query(PO.product_key, PO.observed_on, func.count(PO.id))
+              .filter(PO.observed_on >= since)
+              .group_by(PO.product_key, PO.observed_on).all())
+    days_of: dict = {}
+    for k, d, n in counts:
+        days_of.setdefault(k, {})[d] = n
+    # A product qualifies only with reports on at least two days and at
+    # least two reports on its first and on its latest day.
+    ends = {}
+    for k, per_day in days_of.items():
+        first, last = min(per_day), max(per_day)
+        if first != last and per_day[first] >= 2 and per_day[last] >= 2:
+            ends[k] = (first, last, sum(per_day.values()))
+    # Step 2: prices for just those two days of just those products.
+    wanted: dict = {}
+    for k, (first, last, _) in ends.items():
+        wanted.setdefault(first, []).append(k)
+        wanted.setdefault(last, []).append(k)
+    prices: dict = {}
+    for day, keys in wanted.items():
+        for i in range(0, len(keys), 500):
+            for k, p in (db.query(PO.product_key, PO.price)
+                         .filter(PO.observed_on == day, PO.product_key.in_(keys[i:i + 500])).all()):
+                prices.setdefault((k, day), []).append(p)
     drops = []
-    for k, rs in per.items():
-        daily = community.daily_medians(rs)
-        if len(daily) < 2 or daily[0]["reports"] < 2 or daily[-1]["reports"] < 2:
+    for k, (first, last, total) in ends.items():
+        a_rows, b_rows = prices.get((k, first)), prices.get((k, last))
+        if not a_rows or not b_rows:
             continue
-        a, b = daily[0]["price"], daily[-1]["price"]
-        if b < a * 0.95:
+        a = community.daily_medians([(first, p) for p in a_rows])[0]["price"]
+        b = community.daily_medians([(last, p) for p in b_rows])[0]["price"]
+        if a > 0 and b < a * 0.95:
             drops.append({"key": k, "from": a, "to": b, "pct": round((a - b) / a * 100, 1),
-                          "reports": sum(x["reports"] for x in daily), "since": daily[0]["day"]})
+                          "reports": total, "since": first.isoformat()})
     drops.sort(key=lambda x: -x["pct"])
     with _drops_lock:
         _drops_cache[payload.days] = (_time.monotonic(), drops[:50])
@@ -714,7 +740,7 @@ def create_demo_audit(payload: schemas.DemoAuditCreate, db: Session = Depends(ge
             status_code=400,
             detail=f"The public demo runs only: {list(config.PUBLIC_DEMO_ADAPTERS)}",
         )
-    job_id = submit_audit_job(payload.adapter_name, None, enforce_limit=False)
+    job_id = submit_audit_job(payload.adapter_name, None, enforce_limit=False, org=config.DEMO_ORG)
     job = db.get(models.AuditJob, job_id)
     return _to_job_out(job)
 

@@ -101,8 +101,17 @@ def _run_job(job_id: int, adapter_name: Optional[str], target_urls: Optional[Lis
         job = db.get(AuditJob, job_id)
         if job is None:
             return      # deleted before a worker reached it
+        if job.status == "cancelled":
+            return      # cancelled between the claim and now
         job.status = "running"
         db.commit()
+
+        def should_stop() -> bool:
+            """Checked by the walker before every step, so "Stop this audit"
+            stops the browser within one page instead of after the walk."""
+            with SessionLocal() as check:
+                row = check.get(AuditJob, job_id)
+                return row is None or bool(row.cancel_requested)
 
         # Screenshots go in a directory of this job's own. They used to be
         # named from the adapter and step alone, and discovery's step names are
@@ -117,17 +126,20 @@ def _run_job(job_id: int, adapter_name: Optional[str], target_urls: Optional[Lis
             # Discovery mode: one URL in, and the crawler finds its own way to
             # the checkout. The URL was already SSRF-validated in
             # submit_audit_job before this job row was created.
-            trace = walk_discovered_funnel(target_urls[0], screenshot_dir=evidence_dir)
+            trace = walk_discovered_funnel(target_urls[0], screenshot_dir=evidence_dir,
+                                           should_stop=should_stop)
             site_name = trace.site_name
         else:
             if adapter_name:
                 adapter = ADAPTER_REGISTRY[adapter_name]
             else:
                 adapter = _build_adhoc_adapter(target_urls)
-            trace = walk_funnel(adapter, screenshot_dir=evidence_dir)
+            trace = walk_funnel(adapter, screenshot_dir=evidence_dir, should_stop=should_stop)
             site_name = adapter.site_name
 
-        violations = audit(trace, use_llm=use_llm)
+        # A stopped walk is not analysed: findings from half a funnel would
+        # read as a complete audit.
+        violations = [] if getattr(trace, "cancelled", False) else audit(trace, use_llm=use_llm)
 
         # Deleted while the browser was walking: write nothing, and remove
         # the screenshots it took -- otherwise findings would be inserted for
@@ -338,10 +350,13 @@ def claim(job_id: int) -> Optional[dict]:
     """Atomically move one job from pending to running. Returns its request,
     or None if someone else claimed it, it was cancelled, or it has no stored
     request (made before 2.4)."""
-    now = datetime.now(timezone.utc)
+    now = _utcnow()
     with SessionLocal() as db:
         updated = (db.query(AuditJob)
-                   .filter(AuditJob.id == job_id, AuditJob.status == "pending")
+                   .filter(AuditJob.id == job_id, AuditJob.status == "pending",
+                           # A row with no stored request cannot run; claiming it
+                           # would strand it as "running" until it went stale.
+                           AuditJob.request_json.isnot(None))
                    .update({AuditJob.status: "running", AuditJob.heartbeat_at: now,
                             AuditJob.attempts: func.coalesce(AuditJob.attempts, 0) + 1},
                            synchronize_session=False))
@@ -357,7 +372,7 @@ def _heartbeat(job_id: int, stop: threading.Event) -> None:
         try:
             with SessionLocal() as db:
                 db.query(AuditJob).filter(AuditJob.id == job_id, AuditJob.status == "running") \
-                  .update({AuditJob.heartbeat_at: datetime.now(timezone.utc)}, synchronize_session=False)
+                  .update({AuditJob.heartbeat_at: _utcnow()}, synchronize_session=False)
                 db.commit()
         except Exception:
             logger.exception("Heartbeat failed for audit job %s", job_id)
@@ -382,6 +397,13 @@ def _claim_and_run(job_id: int) -> None:
             _queued.discard(job_id)
 
 
+def _utcnow():
+    """Naive UTC, the way the DateTime columns store time. Comparing those
+    columns with an AWARE datetime is undefined across databases (SQLite
+    compares strings, PostgreSQL converts by session time zone)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def _as_aware(dt):
     if dt is None:
         return None
@@ -398,6 +420,7 @@ def recover_jobs(dispatch_pending: bool = True) -> dict:
     honestly instead of spinning forever."""
     now = datetime.now(timezone.utc)
     stale_before = now - timedelta(seconds=config.JOB_STALE_SECONDS)
+    stale_before_naive = stale_before.replace(tzinfo=None)
     requeued, failed, started = 0, 0, 0
     with SessionLocal() as db:
         for job in db.query(AuditJob).filter(AuditJob.status == "running").all():
@@ -425,17 +448,19 @@ def recover_jobs(dispatch_pending: bool = True) -> dict:
         db.commit()
 
         if dispatch_pending:
-            pending = [j.id for j in db.query(AuditJob.id).filter(AuditJob.status == "pending")
-                       .order_by(AuditJob.id).all()]
+            # Close the ones that can never run FIRST, then list what to start.
             no_request = [j.id for j in db.query(AuditJob)
                           .filter(AuditJob.status == "pending", AuditJob.request_json.is_(None),
-                                  AuditJob.created_at < stale_before).all()]
+                                  AuditJob.created_at < stale_before_naive).all()]
             for jid in no_request:
                 row = db.get(AuditJob, jid)
                 row.status, row.completed_at = "failed", now
                 row.error_message = "The server restarted before this audit started. Please run it again."
                 failed += 1
             db.commit()
+            pending = [j.id for j in db.query(AuditJob.id)
+                       .filter(AuditJob.status == "pending", AuditJob.request_json.isnot(None))
+                       .order_by(AuditJob.id).all()]
         else:
             pending = []
     for jid in pending:
@@ -449,18 +474,25 @@ def recover_jobs(dispatch_pending: bool = True) -> dict:
 def request_cancel(db, job: AuditJob) -> str:
     """Cancel a pending job at once; ask a running one to stop at the next
     safe point. Returns the resulting status."""
-    if job.status == "pending":
-        job.status = "cancelled"
-        job.cancel_requested = 1
-        job.completed_at = datetime.now(timezone.utc)
-        job.error_message = "Cancelled before it started."
-        db.commit()
+    # Atomic, like claim(): "cancel if STILL pending". Read-then-write could
+    # cancel a job a worker had just claimed, and the worker then set it back
+    # to running.
+    done = (db.query(AuditJob)
+            .filter(AuditJob.id == job.id, AuditJob.status == "pending")
+            .update({AuditJob.status: "cancelled", AuditJob.cancel_requested: 1,
+                     AuditJob.completed_at: _utcnow(),
+                     AuditJob.error_message: "Cancelled before it started."},
+                    synchronize_session=False))
+    db.commit()
+    if done == 1:
+        db.refresh(job)
         return "cancelled"
-    if job.status == "running":
-        job.cancel_requested = 1
-        db.commit()
-        return "cancelling"
-    return job.status
+    asked = (db.query(AuditJob)
+             .filter(AuditJob.id == job.id, AuditJob.status == "running")
+             .update({AuditJob.cancel_requested: 1}, synchronize_session=False))
+    db.commit()
+    db.refresh(job)
+    return "cancelling" if asked == 1 else job.status
 
 
 def sweep_loop(stop_event: threading.Event) -> None:
