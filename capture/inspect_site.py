@@ -23,11 +23,15 @@ from app.privacy import redact
 def inspect(url: str, headless: bool = True):
     with playwright_session() as p:
         browser = launch_browser(p, headless=headless)
-        page, _guard = new_guarded_page(browser)
-        page.goto(url, timeout=20000)
-        page.wait_for_timeout(500)
-        state = extract_page_state(page, step_name="inspect")
-        browser.close()
+        # Closed on EVERY path: a goto, click or screenshot that throws
+        # used to skip the close at the end.
+        try:
+            page, _guard = new_guarded_page(browser)
+            page.goto(url, timeout=20000)
+            page.wait_for_timeout(500)
+            state = extract_page_state(page, step_name="inspect")
+        finally:
+            browser.close()
 
     print(f"\n=== Inspection report for {url} ===\n")
     print(f"Price detected: {state.price} (source: {state.price_source})")

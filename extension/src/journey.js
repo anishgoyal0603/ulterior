@@ -19,7 +19,6 @@
   const KEY = "journey:" + SITE;
   const MAX_AGE_MS = 3 * 3600 * 1000;
   const NOT_PRICE = /\b(m\.?r\.?p|save|saving|off\b|emi|cashback|per\s+month)\b/i;
-  const DISCLOSED = /\b(fees?|charges?|excl\.?|exclusive\s+of|plus\s+taxes)\b|\+\s*(₹|rs\.?\s*\d)/i;
 
   async function getJourney() {
     const j = await P.Session.get(KEY);
@@ -38,7 +37,7 @@
       let best = amounts[0];
       for (const a of amounts) if (a.fontSize > best.fontSize + 0.5) best = a;
       const name = t.replace(/(-|−)?\s*(₹|rs\.?|inr)\s*[\d,.]+/gi, " ").slice(0, 160);
-      return { value: best.value, disclosed: DISCLOSED.test(t), fp: C.fingerprint(name) };
+      return { value: best.value, disclosed: C.disclosesCharges(t), fp: C.fingerprint(name) };
     }
     return null;
   }
@@ -63,7 +62,7 @@
     if (onButton.length) {
       // "Book 2 tickets - ₹500": the button states the amount itself.
       price = onButton[onButton.length - 1].value;
-      disclosed = DISCLOSED.test(t);
+      disclosed = C.disclosesCharges(t);
       fp = last && last.productPrice ? C.fingerprint(productName()) : [];
     } else if (last && last.productPrice) {
       price = last.productPrice;

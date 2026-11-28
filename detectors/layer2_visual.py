@@ -6,6 +6,7 @@ is provable math on rendered output, one tier down from Layer 1's DOM-state
 proofs, but still not a "confidence score" in the ML sense.
 """
 
+import re
 from dataclasses import dataclass
 from typing import List
 
@@ -21,6 +22,9 @@ FONT_RATIO_THRESHOLD = 1.5
 # nearest button anywhere on the page compared a "Close" in a cookie banner
 # with "Checkout" half a screen away.
 MAX_PAIR_DISTANCE_PX = 400
+_COMMERCIAL_RE = re.compile(
+    r"(?:[₹$€£]|\brs\.?|\binr\b)\s?\d|\b(subscribe|upgrade|offer|plan|trial|join|membership|insurance|"
+    r"protection|warranty|add[\s-]?on|premium|buy|checkout|cart|book(ing)?)\b", re.IGNORECASE)
 
 
 def _distance(a, b) -> float:
@@ -50,6 +54,11 @@ def detect_interface_interference(trace: FunnelTrace) -> List[Violation]:
     for state in trace.states:
         declines = [b for b in state.buttons if b.role == "decline"]
         if not declines:
+            continue
+        # Only where something is being sold (as in the extension): a faint
+        # "Skip" beside "Next" in a photo carousel is design, not
+        # interference with a purchase decision.
+        if not _COMMERCIAL_RE.search(state.full_text or ""):
             continue
         others = [b for b in state.buttons if b.role != "decline"]
         seen = set()
@@ -130,19 +139,30 @@ def detect_disguised_ad_disclosure(trace: FunnelTrace) -> List[Violation]:
     violations = []
     for state in trace.states:
         for label in state.disclosure_labels:
+            ratio = label.contrast_ratio or 21.0
+            size = label.font_size_px or 16.0
+            # As in the extension: clearly unreadable (below 3:1, or under
+            # 9px), or faint AND small together. A readable 12px grey
+            # "Sponsored" at 4.48:1 -- 0.02 under AA -- is not hidden.
+            if not (ratio < 3.0 or size < 9.0 or (ratio < DISCLOSURE_LOW_CONTRAST_THRESHOLD and size < 11.0)):
+                continue
             reasons = []
-            if label.contrast_ratio < DISCLOSURE_LOW_CONTRAST_THRESHOLD:
+            if ratio < DISCLOSURE_LOW_CONTRAST_THRESHOLD:
                 reasons.append(f"contrast {label.contrast_ratio}:1 "
                                 f"(below WCAG AA {DISCLOSURE_LOW_CONTRAST_THRESHOLD}:1 for small text)")
-            if label.font_size_px and label.font_size_px < DISCLOSURE_SMALL_FONT_THRESHOLD_PX:
+            if size < DISCLOSURE_SMALL_FONT_THRESHOLD_PX:
                 reasons.append(f"font size {label.font_size_px}px "
                                 f"(below {DISCLOSURE_SMALL_FONT_THRESHOLD_PX}px)")
+            if not reasons:
+                reasons.append(f"contrast {label.contrast_ratio}:1 at {label.font_size_px}px")
+            # Two signals (faint AND tiny) corroborate; one is indicative.
+            tier = CORROBORATED if len(reasons) >= 2 or ratio < 3.0 else INDICATIVE
             if reasons:
                 violations.append(Violation(
                     pattern_code="DP-09", pattern_name=BY_CODE["DP-09"].name,
                     step_name=state.step_name,
-                    confidence=clamp_confidence(CORROBORATED, 0.6),
-                    evidence={"evidence_tier": CORROBORATED, "disclosure_text": label.text, "reasons": reasons,
+                    confidence=clamp_confidence(tier, 0.6 if tier == CORROBORATED else 0.45),
+                    evidence={"evidence_tier": tier, "disclosure_text": label.text, "reasons": reasons,
                               "contrast_ratio": label.contrast_ratio, "font_size_px": label.font_size_px},
                     layer=2,
                     explanation=(f"Ad/sponsorship disclosure '{label.text}' is present in the DOM "

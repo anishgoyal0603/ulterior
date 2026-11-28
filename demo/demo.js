@@ -201,6 +201,7 @@ async function runAudit() {
             || "Failed \u2014 see the terminal running the server", true);
         }
         renderFindings(job.violations || []);
+        return;              // finished: the 90 s check below is for runs still going
       }
       // A funnel walk with two reloads takes ~10s; 90s means something is
       // genuinely wrong and the page should say so rather than spin forever.

@@ -11,7 +11,7 @@ import re
 from types import SimpleNamespace
 
 from .taxonomy import BY_CODE, PROVABLE, CORROBORATED, INDICATIVE, clamp_confidence
-from .vocab import BENEFIT_RE, DECLINE_CHOICE_RE, PAID_ADDON_RE, is_recurring_label
+from .vocab import BENEFIT_RE, DECLINE_CHOICE_RE, EMI_RE, PAID_ADDON_RE, is_recurring_label
 from capture.funnel_walker import FunnelTrace
 from capture.state_extractor import PageState, format_money, parse_money
 
@@ -37,8 +37,16 @@ def _mentions_amount(text: str, amount: float) -> bool:
     if not text or not amount:
         return False
     whole = int(round(amount))
-    variants = sorted({str(whole), f"{whole:,}", f"{amount:.2f}", f"{whole:,}.00",
-                       _indian_grouping(whole)}, key=len, reverse=True)
+    variants = {str(whole), f"{whole:,}", _indian_grouping(whole)}
+    if abs(amount - whole) < 0.005:
+        variants |= {f"{whole}.00", f"{whole:,}.00", _indian_grouping(whole) + ".00"}
+    else:
+        # ₹1,299.50 / ₹1,23,456.50: the paise go on the TRUNCATED rupees with
+        # the same grouping. (Rounding first gave "1,300.00" and never the
+        # figure the page printed.)
+        rupees, paise = int(amount), f"{amount:.2f}".split(".")[1]
+        variants = {f"{rupees}.{paise}", f"{rupees:,}.{paise}", f"{_indian_grouping(rupees)}.{paise}"}
+    variants = sorted(variants, key=len, reverse=True)
     haystack = text.replace("\u00a0", " ")
     number = "|".join(re.escape(v) for v in variants)
     # As a PRICE: with a currency mark before it (or "/-" after it), and not
@@ -95,6 +103,11 @@ _NOT_A_TOTAL = re.compile(
     r"you\s+saved|total\s+(items?|qty|quantity))\b", re.IGNORECASE)
 
 
+_FEE_WORDS = re.compile(
+    r"\b(fee|fees|charge|charges|delivery|shipping|handling|convenience|platform|tax|gst|surcharge|"
+    r"packaging|packing|cod|service|booking|processing)\b", re.IGNORECASE)
+
+
 def _stated_total(state: "PageState") -> Optional[float]:
     """The figure the page itself puts next to the word "total".
 
@@ -112,17 +125,23 @@ def _stated_total(state: "PageState") -> Optional[float]:
     from capture.state_extractor import _PROMO_THRESHOLD_RE
     lines = [ln.strip() for ln in (state.full_text or "").splitlines() if ln.strip()]
     best = {}                     # rank -> amount (last seen)
-    for i, line in enumerate(lines):
+    for i, raw_line in enumerate(lines):
+        # Parenthetical notes are not the label: "Order Total (₹100 off):
+        # ₹457" is a total of ₹457. Testing the whole line for "off" skipped
+        # it, and reading its first amount gave ₹100.
+        line = re.sub(r"\([^)]*\)", " ", raw_line)
         is_sub = bool(_SUBTOTAL.search(line))
         if not is_sub and not _FINAL_TOTAL.search(line):
             continue
         if _NOT_A_TOTAL.search(line) or _PROMO_THRESHOLD_RE.search(line):
             continue
         amount = parse_money(line)
-        if not amount and i + 1 < len(lines) and not _STATES_A_TOTAL.search(lines[i + 1]):
+        if (not amount and i + 1 < len(lines) and not _STATES_A_TOTAL.search(lines[i + 1])
+                and not _NOT_A_TOTAL.search(lines[i + 1]) and not _PROMO_THRESHOLD_RE.search(lines[i + 1])):
             # <div><span>Total</span><span>₹457</span></div> renders as two
-            # lines: the label on one, the amount on the next.
-            amount = parse_money(lines[i + 1])
+            # lines: the label on one, the amount on the next. Never a
+            # savings line ("Total" over "You saved ₹150").
+            amount = parse_money(re.sub(r"\([^)]*\)", " ", lines[i + 1]))
         if not amount:
             continue
         rank = 1 if is_sub else (3 if _PAYABLE.search(line) else 2)
@@ -248,10 +267,17 @@ def detect_drip_pricing(trace: FunnelTrace) -> List[Violation]:
         # the product page; it is recognised by costing the price that page
         # showed. Only one row is removed -- two rows at that price means the
         # second is something else.
-        for li in undisclosed:
-            if abs(li["price"] - first.price) <= max(first.price * 0.02, 1):
-                undisclosed.remove(li)
-                break
+        # Only when the product row was NOT already recognised by name, and
+        # never a fee row: on a ₹49 item with a ₹49 delivery fee, the fee was
+        # being removed as "the product" and DP-08 went silent.
+        def _at_product_price(li):
+            return abs(li["price"] - first.price) <= max(first.price * 0.02, 1)
+        product_named = any(_at_product_price(li) and li not in undisclosed for li in last.line_items)
+        if not product_named:
+            for li in undisclosed:
+                if _at_product_price(li) and not _FEE_WORDS.search(li["name"]):
+                    undisclosed.remove(li)
+                    break
 
         # DP-08 is about charges the shop did NOT disclose up front -- that is
         # what "drip" means. The list above already works out which additions
@@ -329,9 +355,19 @@ def detect_basket_sneaking_and_prechecked(trace: FunnelTrace) -> List[Violation]
                 if is_recurring_label(cb.label_text):
                     continue
                 label = (cb.label_text or "").replace("\u2019", "'")
+                amount = parse_money(label)
+                # A credit: the minus TOUCHES the currency ("-₹50"), or opens
+                # the text / a bracket ("- ₹50", "(- ₹50)"). A dash used as
+                # punctuation ("Carry Bag - ₹15") is not a minus.
+                if re.search(r"(?:^|[\s(])[-\u2212](?=[₹$€£]|rs\.?\s?\d|inr)|(?:^|\()\s*[-\u2212]\s+(?=[₹$€£]|rs|inr)",
+                             label.strip(), re.IGNORECASE):
+                    amount = None
+                is_paid_addon = bool(PAID_ADDON_RE.search(label)) and (amount or 0) > 0
                 # Pre-ticked to GIVE something (wallet balance, cashback, a
-                # coupon) or to record a preference: not an added charge.
-                if BENEFIT_RE.search(label):
+                # coupon) or to record a preference: not an added charge --
+                # unless it names a paid extra with a price ("Extended
+                # Warranty ₹299 (T&C apply)", "I agree to add insurance ₹199").
+                if BENEFIT_RE.search(label) and not is_paid_addon:
                     continue
                 # A radio group is a required choice (shipping speed, payment
                 # method, size). Its default is basket sneaking only when the
@@ -343,9 +379,6 @@ def detect_basket_sneaking_and_prechecked(trace: FunnelTrace) -> List[Violation]
                         and DECLINE_CHOICE_RE.search(other.label_text or "")
                         for other in state.checkboxes):
                     continue
-                amount = parse_money(label)
-                if re.search(r"[-\u2212]\s*(?:[₹$€£]|\brs\.?|\binr\b)", label, re.IGNORECASE):
-                    amount = None          # "-₹50": a credit, not a charge
                 # A positive amount in any currency form ("₹199", "Rs. 199",
                 # "INR 199"); ₹0 and credits ("-₹50") are not charges.
                 matches_charge = (amount is not None and amount > 0) \
@@ -483,6 +516,35 @@ def detect_fake_urgency(trace: FunnelTrace) -> List[Violation]:
 # are DIFFERENT strengths of evidence and DP-01 now treats them differently,
 # so they are extracted separately.
 _CLOCK_RE = re.compile(r"\b\d{1,3}\s*:\s*\d{2}(?:\s*:\s*\d{2})?\b")
+# "04h 22m 18s", "4 hrs 22 mins", "08m 12s" -- how Flipkart, Myntra and
+# Amazon write their timers.
+_UNIT_CLOCK_RE = re.compile(
+    r"\b(?:(\d{1,2})\s*h(?:rs?|ours?)?\s*(\d{1,2})\s*m(?:ins?|inutes?)?(?:\s*(\d{1,2})\s*s(?:ecs?|econds?)?)?"
+    r"|(\d{1,2})\s*m(?:ins?|inutes?)?\s*(\d{1,2})\s*s(?:ecs?|econds?)?)\b", re.IGNORECASE)
+# A clock that names a TIME OF DAY is a fixed closing time, not a countdown:
+# "Sale ends at 11:59 PM", "Offer ends 23:59 IST". Unchanged across a reload
+# is exactly what a closing time should be.
+_WALL_CLOCK_AFTER = re.compile(r"^\s*(a\.?m\.?|p\.?m\.?|ist|utc|gmt|hrs\b|o'?clock|tonight|today|tomorrow)", re.IGNORECASE)
+_WALL_CLOCK_BEFORE = re.compile(r"\b(at|until|till|by|before|on)\s*$", re.IGNORECASE)
+
+
+def _find_clock(span: str) -> str:
+    """The first countdown-looking clock in this span, normalised to
+    H:MM:SS / MM:SS, or "" when there is none (time-of-day clocks skipped)."""
+    found = []
+    for m in _CLOCK_RE.finditer(span):
+        found.append((m.start(), m.end(), m.group(0).replace(" ", "")))
+    for m in _UNIT_CLOCK_RE.finditer(span):
+        if m.group(1) is not None:
+            h, mi, se = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+            found.append((m.start(), m.end(), f"{h}:{mi:02d}:{se:02d}"))
+        else:
+            found.append((m.start(), m.end(), f"{int(m.group(4))}:{int(m.group(5)):02d}"))
+    for start, end, value in sorted(found):
+        if _WALL_CLOCK_AFTER.search(span[end:end + 12]) or _WALL_CLOCK_BEFORE.search(span[:start]):
+            continue
+        return value
+    return ""
 _COUNT_RE = re.compile(r"\b\d{1,6}\b")
 
 
@@ -575,37 +637,39 @@ def _extract_urgent_value(text: str, pattern: str) -> str:
     The window extends a little past the match because the number often sits
     just after the phrase ("Offer ends in: 00:04:59", "Only 2 left").
     """
-    m = re.search(pattern, text, re.IGNORECASE)
-    if not m:
-        return ""
-    # A clock may sit just past the phrase ("Offer ends in: 00:04:59"), so
-    # look a little way ahead -- but ONLY when this phrase claims a deadline.
-    # See _DEADLINE_PATTERNS: next to a seats-left message, a clock is a
-    # departure time.
-    if _is_deadline_pattern(pattern):
-        clock = _CLOCK_RE.search(text[m.start():m.end() + 24])
-        if clock:
-            return clock.group(0).replace(" ", "")
-    # A COUNT, though, must be inside the phrase itself ("only 2 left").
-    # Reading ahead for it swept up any number that happened to follow --
-    # "Hurry, offer ends 15 August" yielded "15" and a real sale with a real
-    # calendar date was reported as static fake scarcity. A date is not a
-    # depleting quantity, and the scarcity patterns that matter all bind the
-    # number to a depletion word inside the match.
-    return _count_in(m.group(0))
+    # EVERY occurrence, not just the first: a header "Limited time offer"
+    # with no value used to hide a frozen timer further down the page.
+    for m in re.finditer(pattern, text, re.IGNORECASE):
+        # A clock may sit just past the phrase ("Offer ends in: 00:04:59"), so
+        # look a little way ahead -- but ONLY when this phrase claims a
+        # deadline. See _DEADLINE_PATTERNS: next to a seats-left message, a
+        # clock is a departure time.
+        if _is_deadline_pattern(pattern):
+            clock = _find_clock(text[m.start():m.end() + 24])
+            if clock:
+                return clock
+        # A COUNT, though, must be inside the phrase itself ("only 2 left").
+        # Reading ahead for it swept up any number that happened to follow --
+        # "Hurry, offer ends 15 August" yielded "15" and a real sale with a
+        # real calendar date was reported as static fake scarcity. A date is
+        # not a depleting quantity, and the scarcity patterns that matter all
+        # bind the number to a depletion word inside the match.
+        count = _count_in(m.group(0))
+        if count:
+            return count
+    return ""
 
 
 def _urgency_value_kind(text: str, patterns: List[str]) -> str:
     """"countdown" if any urgency claim carries a clock, else "count"/""."""
+    kind = ""
     for pattern in patterns:
-        m = re.search(pattern, text, re.IGNORECASE)
-        if not m:
-            continue
-        if _is_deadline_pattern(pattern) and _CLOCK_RE.search(text[m.start():m.end() + 24]):
-            return "countdown"
-        if _count_in(m.group(0)):
-            return "count"
-    return ""
+        for m in re.finditer(pattern, text, re.IGNORECASE):
+            if _is_deadline_pattern(pattern) and _find_clock(text[m.start():m.end() + 24]):
+                return "countdown"
+            if _count_in(m.group(0)):
+                kind = "count"
+    return kind
 
 
 def detect_reference_pricing(trace: FunnelTrace) -> List[Violation]:
@@ -627,7 +691,10 @@ def detect_reference_pricing(trace: FunnelTrace) -> List[Violation]:
         # Whole words, and the figure must be written as money: "canvas: 2000"
         # or "was 2000 employees" are not reference prices.
         was_matches = re.findall(
-            r"\b(?:was|mrp|m\.r\.p\.?|original price|list price)\b[:\s]*"
+            # \b only after the word-ending labels: after "M.R.P." the dot is
+            # already a non-word character, so a \b there never matched and
+            # the standard Indian "M.R.P. ₹2,499" was never read.
+            r"(?:\b(?:was|mrp|original price|list price)\b|\bm\.r\.p\.?)[:\s]*"
             r"(?:[₹$€£]|\brs\.?|\binr\b)\s?([\d,]+(?:\.\d+)?)",
             state.full_text, re.IGNORECASE)
         now_price = state.price
@@ -754,6 +821,12 @@ def detect_bait_and_switch(trace: FunnelTrace) -> List[Violation]:
             # price was a false accusation.
             if re.search(r"\b(save|off|cashback|discount|above|over|min(imum)?|upto|up to|from)\b",
                          text, re.IGNORECASE):
+                continue
+            # An add-on's own price ("Add 2-year warranty ₹49"), an EMI or a
+            # price lock is not a promise about the NEXT page's price: the
+            # crawler followed "Add to cart", not the warranty button.
+            if PAID_ADDON_RE.search(text) or EMI_RE.search(text) or re.search(
+                    r"\b(lock|freeze|hold)\s+(the\s+|this\s+)?(price|fare)\b", text, re.IGNORECASE):
                 continue
             claimed_prices = re.findall(
                 r"(?:[₹$€£]|\brs\.?|\binr\b)\s?([\d,]+(?:\.\d+)?)", text, re.IGNORECASE)

@@ -52,7 +52,8 @@ the user for declining (e.g. "No thanks, I like paying full price").
 2. TRICK WORDING (DP-11): confusing phrasing, double negatives, or ambiguity that could cause \
 a user to act against their actual intent.
 
-You will be given the text of one or more buttons/links from a single page. Respond ONLY with \
+You will be given the text of decline buttons/links and of checkbox/radio labels from a single \
+page. Respond ONLY with \
 valid JSON in this exact shape:
 {
   "violations": [
@@ -84,6 +85,9 @@ GUILT_PATTERNS = [
     r"like (paying )?full price",
     r"don'?t (mind )?miss(ing)? out",
     r"don'?t want \d+%",
+    # Sarcastic zero only ("No thanks, I'd like 0% off"). "I'd like 10% off"
+    # is the ACCEPT wording, which is why the general pattern was removed.
+    r"'?d like 0% off",
     # "No, not interested" is the neutral way to decline and is not guilt;
     # the extension already left it out.
     r"\bhate (saving|cool)\b",
@@ -122,6 +126,32 @@ OPT_OUT_LABEL_PATTERNS = [
 ]
 
 
+# "I don't want / need ...", "I do not want" and "without protection" are how
+# shaming copy is usually built ("No, I don't want to save money") -- and also
+# how a plain, neutral decline is written ("No, I don't need a warranty",
+# "Continue without protection"). When those are the ONLY guilt signal, the
+# text must also put a value or a self-judgement on the line before it counts.
+_SOFT_GUILT = [GUILT_PATTERNS[0], r"\bi do not want\b", r"\bwithout (a )?(protection|insurance|discount)\b"]
+_STRONG_DONT = re.compile(r"\bi don'?t (like|care about|mind|hate|despise)\b", re.IGNORECASE)
+_VALUE_WORDS = re.compile(
+    r"\b(sav(e|ing|ings)|discounts?|deals?|offers?|money|free|benefits?|better|smart|win(ning|s)?|lucky|best|cheap|"
+    r"rather|kick|"
+    r"protect(ed|ing)?\s+(my|me|myself)|secure\s+my|safe(ty)?|exclusive|rewards?|full\s+price|pay\s+more|"
+    r"miss(ing)?\s+out|risk|luck|style|stylish|healthy|happy|fun|great|amazing|special|vip|perks?)\b",
+    re.IGNORECASE)
+
+
+def _is_shaming(text: str) -> bool:
+    hits = [p for p in GUILT_PATTERNS if re.search(p, text, re.IGNORECASE)]
+    if not hits:
+        return False
+    if _STRONG_DONT.search(text):
+        return True           # "I don't like discounts" is never neutral
+    if all(p in _SOFT_GUILT for p in hits) and not _VALUE_WORDS.search(text):
+        return False          # a neutral "No, I don't need a warranty"
+    return True
+
+
 def _offline_confirm_shaming(button_texts: List[str]) -> List[dict]:
     """
     Deterministic DP-03 detection.
@@ -138,7 +168,7 @@ def _offline_confirm_shaming(button_texts: List[str]) -> List[dict]:
     found = []
     for text in button_texts:
         normalized = text.replace("’", "'").replace("‘", "'")
-        if len(text) > 8 and any(re.search(p, normalized, re.IGNORECASE) for p in GUILT_PATTERNS):
+        if len(text) > 8 and _is_shaming(normalized):
             found.append({
                 "pattern_code": "DP-03", "quoted_text": text,
                 "confidence": 0.6,
@@ -241,16 +271,17 @@ def _safe_confidence(candidate: dict) -> float:
     return min(max(value, 0.0), 1.0)
 
 
-def _call_anthropic(button_texts: List[str]) -> dict:
+def _call_anthropic(button_texts: List[str], choice_labels: List[str] = ()) -> dict:
     """
     THIRD-PARTY DATA EGRESS — this is the ONLY point in the entire app where
     captured page content leaves the machine, and it now happens only when an
     audit explicitly asked for it.
 
-    What is sent: ONLY the text of buttons/links whose CSS class marks them as
-    a decline/opt-out control. Not the page HTML, not the full page text, not
-    screenshots, not URLs, not prices, not any user session data. Typically
-    1-2 short strings per page.
+    What is sent: ONLY the text of decline/opt-out buttons and links, and the
+    labels of checkboxes and radio buttons (where trick wording lives: "Untick
+    if you do not want..."). Not the page HTML, not the full page text, not
+    screenshots, not URLs, not any user session data. A few short strings per
+    page, each capped at 300 characters.
 
     Why so little: confirm shaming and trick wording are properties of the
     decline option's WORDING alone. Sending more would give the model no
@@ -261,15 +292,23 @@ def _call_anthropic(button_texts: List[str]) -> dict:
     PII is stripped before transmission.
     """
     import anthropic
-    safe_texts = [redact(t) for t in button_texts]
-    client = anthropic.Anthropic()
+    safe_buttons = [redact(t)[:300] for t in button_texts]
+    safe_labels = [redact(t)[:300] for t in choice_labels][:20]
+    content = "Decline button/link texts on this page:\n" + "\n".join(f"- {t}" for t in safe_buttons)
+    if safe_labels:
+        content += "\n\nCheckbox/radio labels on this page:\n" + "\n".join(f"- {t}" for t in safe_labels)
+    # A bounded wait: an unanswered API call must not hold an audit worker.
+    client = anthropic.Anthropic(timeout=30.0, max_retries=1)
     resp = client.messages.create(
-        model="claude-sonnet-4-6", max_tokens=500, system=SYSTEM_PROMPT,
-        messages=[{"role": "user",
-                   "content": "Button/link texts on this page:\n"
-                              + "\n".join(f"- {t}" for t in safe_texts)}],
+        model="claude-sonnet-4-6", max_tokens=700, system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": content}],
     )
     return _parse_model_json(resp.content[0].text)
+
+
+def _norm(text: str) -> str:
+    t = (text or "").replace("\u2019", "'").replace("\u2018", "'").replace("\u201c", '"').replace("\u201d", '"')
+    return re.sub(r"\s+", " ", t).strip().lower()
 
 
 def _parse_model_json(text: str) -> dict:
@@ -304,9 +343,10 @@ def detect_language_patterns(trace: FunnelTrace, use_llm: bool = False) -> List[
         candidates = _offline_confirm_shaming(decline_texts) + _offline_trick_wording(state)
         sources = {id(c): "offline_rules" for c in candidates}
 
-        if llm_requested and llm_available and decline_texts:
+        choice_labels = [c.label_text for c in state.checkboxes if (c.label_text or "").strip()]
+        if llm_requested and llm_available and (decline_texts or choice_labels):
             try:
-                extra = _call_anthropic(decline_texts).get("violations", [])
+                extra = _call_anthropic(decline_texts, choice_labels).get("violations", [])
                 for item in extra:
                     sources[id(item)] = "anthropic_api"
                 candidates += extra
@@ -317,11 +357,16 @@ def detect_language_patterns(trace: FunnelTrace, use_llm: bool = False) -> List[
                 # can be told apart.
                 logger.warning("Layer 3 LLM pass failed at step %s: %s", state.step_name, type(exc).__name__)
 
+        grounding = "\n".join(_norm(t) for t in [state.full_text]
+                               + [b.text for b in state.buttons] + choice_labels)
         seen = set()
         for candidate in candidates:
             quoted = (candidate.get("quoted_text") or "").strip()
-            # GROUNDING: reject anything not literally present on the page.
-            if not quoted or quoted.lower() not in state.full_text.lower():
+            # GROUNDING: reject anything not literally present on the page --
+            # in its text, or as a control's own label (an aria-label is not
+            # in the rendered text). Compared after normalising quotes and
+            # whitespace, which differ between innerText and labels.
+            if not quoted or _norm(quoted) not in grounding:
                 continue
             code = candidate.get("pattern_code", "DP-03")
             if code not in BY_CODE:

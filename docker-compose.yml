@@ -38,12 +38,21 @@ services:
       -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem
       -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key
       -c password_encryption=scram-sha-256
+    # The API and workers create tables at startup. "depends_on" alone only
+    # waits for the container to START, not for Postgres to accept
+    # connections, so a cold start could fail init_db().
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    # No `command:` -- the Dockerfile's CMD starts uvicorn and turns on proxy
+    # headers only when TRUST_PROXY_HEADERS=true (behind nginx/Caddy/Railway).
     environment:
       APP_ENV: ${APP_ENV:-production}
       DEBUG: "false"
@@ -65,7 +74,9 @@ services:
       MAX_STORED_AUDITS: ${MAX_STORED_AUDITS:-500}
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
     # Bind to loopback only: terminate TLS at a reverse proxy (nginx/Caddy/
     # a cloud load balancer) in front of this, rather than exposing the app
     # server directly to the internet over plain HTTP.
@@ -89,7 +100,9 @@ services:
       EVIDENCE_DIR: /data/evidence
       AUDIT_WORKERS: ${AUDIT_WORKERS:-2}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
     # The worker runs a browser on untrusted sites: give it nothing extra.
     # Network isolation through an egress proxy is the next step (see
     # docs/operations.md); application-level guards are already in place.

@@ -210,5 +210,26 @@ test("wallet balance and cashback are benefits, not add-ons", () => {
   assert.ok(C.BENEFIT_RE.test("Apply \u20b9100 cashback"));
 });
 
+// --- fourth code review (November 2026) -----------------------------------
+test("'no hidden fees' and 'inclusive of all fees' are not a disclosure of extra charges", () => {
+  for (const t of ["Inclusive of all fees", "No hidden fees", "Zero delivery charges", "Delivery charges: FREE"]) {
+    assert.strictEqual(C.disclosesCharges(t), false, t);
+  }
+  assert.strictEqual(C.disclosesCharges("+ \u20b940 delivery fee"), true);
+  assert.strictEqual(C.disclosesCharges("Convenience fee \u20b999 extra"), true);
+});
+
+test("a neutral decline is not confirmshaming", () => {
+  assert.strictEqual(C.isShaming("No, I don't need warranty"), false);
+  assert.strictEqual(C.isShaming("No, continue without protection"), false);
+  assert.strictEqual(C.isShaming("No thanks, I don't like discounts"), true);
+  assert.strictEqual(C.isShaming("No, I don't want to save money"), true);
+});
+
+test("timestamps are not card numbers", () => {
+  assert.strictEqual(C.redact("2026-11-28 15-08-30"), "2026-11-28 15-08-30");
+  assert.strictEqual(C.redact("4111 1111 1111 1111"), "[CARD]");
+});
+
 if (failures) { console.log(`${failures} failed`); process.exit(1); }
 console.log("all passed");

@@ -89,83 +89,87 @@ def walk_funnel(adapter: SiteAdapter, screenshot_dir: str = DEFAULT_EVIDENCE_DIR
 
     with playwright_session() as p:
         browser = launch_browser(p, headless=headless)
-        page, guard = new_guarded_page(
-            browser, allow_file=allow_file_urls,
-            trusted_origins=[adapter.trusted_origin] if getattr(adapter, "trusted_origin", None) else None)
+        # Closed on EVERY path: a goto, click or screenshot that throws
+        # used to skip the close at the end.
+        try:
+            page, guard = new_guarded_page(
+                browser, allow_file=allow_file_urls,
+                trusted_origins=[adapter.trusted_origin] if getattr(adapter, "trusted_origin", None) else None)
 
-        for step in adapter.funnel_steps:
-            if should_stop is not None and should_stop():
-                trace.cancelled = True       # "Stop this audit": no more pages
-                break
-            if step.url:
-                page.goto(step.url)
-                if step.wait_for_selector:
-                    page.wait_for_selector(step.wait_for_selector, timeout=5000)
-                # Wait for the page to stop changing rather than for a guessed
-                # number of milliseconds -- a hydrated storefront renders
-                # nothing at all in 300ms.
-                wait_until_rendered(page)
+            for step in adapter.funnel_steps:
+                if should_stop is not None and should_stop():
+                    trace.cancelled = True       # "Stop this audit": no more pages
+                    break
+                if step.url:
+                    page.goto(step.url)
+                    if step.wait_for_selector:
+                        page.wait_for_selector(step.wait_for_selector, timeout=5000)
+                    # Wait for the page to stop changing rather than for a guessed
+                    # number of milliseconds -- a hydrated storefront renders
+                    # nothing at all in 300ms.
+                    wait_until_rendered(page)
 
-            # SPA support: click an element on the CURRENT page instead of
-            # navigating, then wait for the resulting DOM mutation (e.g. a
-            # cart drawer sliding in). This is what Saleor-style storefronts
-            # need -- their cart has no dedicated URL to page.goto() to.
-            # A step can have url, click_selector, or both (goto then click).
-            if step.click_selector:
-                page.click(step.click_selector, timeout=5000)
-                if step.wait_after_click_selector:
-                    page.wait_for_selector(step.wait_after_click_selector, timeout=5000)
-                page.wait_for_timeout(300)
+                # SPA support: click an element on the CURRENT page instead of
+                # navigating, then wait for the resulting DOM mutation (e.g. a
+                # cart drawer sliding in). This is what Saleor-style storefronts
+                # need -- their cart has no dedicated URL to page.goto() to.
+                # A step can have url, click_selector, or both (goto then click).
+                if step.click_selector:
+                    page.click(step.click_selector, timeout=5000)
+                    if step.wait_after_click_selector:
+                        page.wait_for_selector(step.wait_after_click_selector, timeout=5000)
+                    page.wait_for_timeout(300)
 
-            state = extract_page_state(page, step.name, adapter.price_selector_override)
-            trace.states.append(state)
-            trace.step_roles[step.name] = step.role
+                state = extract_page_state(page, step.name, adapter.price_selector_override)
+                trace.states.append(state)
+                trace.step_roles[step.name] = step.role
 
-            # Filename hardening: site_name comes from a server-registered
-            # adapter, not from client input, so this is defence-in-depth
-            # rather than a live path-traversal fix. Still worth doing --
-            # an adapter is a plain Python file a teammate might add, and
-            # a site_name containing "../" would otherwise let a screenshot
-            # escape the evidence directory.
-            safe_site = re.sub(r"[^A-Za-z0-9._-]", "_", adapter.site_name)[:80]
-            safe_step = re.sub(r"[^A-Za-z0-9._-]", "_", step.name)[:40]
-            shot_path = os.path.join(screenshot_dir, f"{safe_site}_{safe_step}.png")
-            # Confirm the resolved path really is inside the evidence dir.
-            if not os.path.abspath(shot_path).startswith(os.path.abspath(screenshot_dir) + os.sep):
-                raise ValueError("Refusing to write screenshot outside the evidence directory")
-            page.screenshot(path=shot_path, full_page=True)
-            trace.screenshots[step.name] = shot_path
+                # Filename hardening: site_name comes from a server-registered
+                # adapter, not from client input, so this is defence-in-depth
+                # rather than a live path-traversal fix. Still worth doing --
+                # an adapter is a plain Python file a teammate might add, and
+                # a site_name containing "../" would otherwise let a screenshot
+                # escape the evidence directory.
+                safe_site = re.sub(r"[^A-Za-z0-9._-]", "_", adapter.site_name)[:80]
+                safe_step = re.sub(r"[^A-Za-z0-9._-]", "_", step.name)[:40]
+                shot_path = os.path.join(screenshot_dir, f"{safe_site}_{safe_step}.png")
+                # Confirm the resolved path really is inside the evidence dir.
+                if not os.path.abspath(shot_path).startswith(os.path.abspath(screenshot_dir) + os.sep):
+                    raise ValueError("Refusing to write screenshot outside the evidence directory")
+                page.screenshot(path=shot_path, full_page=True)
+                trace.screenshots[step.name] = shot_path
 
-            # Dismiss interruptions AFTER the state capture, never before --
-            # the modal must appear in the captured evidence, or a later
-            # nagging finding would cite a screenshot that doesn't show it.
-            if dismiss_interruptions:
-                dismissed = _dismiss_interruptions(page, state)
-                if dismissed:
-                    trace.dismissed_modals.setdefault(step.name, []).extend(dismissed)
-
-            if step.reload_for_urgency_check:
-                time.sleep(reload_delay_seconds)
-                page.reload()
-                if step.wait_for_selector:
-                    page.wait_for_selector(step.wait_for_selector, timeout=5000)
-                # The same wait as the first load: a fixed 300 ms captured an
-                # empty shell on hydrated storefronts, and the reload
-                # comparison then compared a page with nothing on it.
-                wait_until_rendered(page)
-                second_state = extract_page_state(page, step.name, adapter.price_selector_override)
-                trace.reload_pairs[step.name] = (state, second_state)
-                # A reload brings the pop-up back. Close it again so it does
-                # not cover the next step's controls. Not recorded as a
-                # dismissal: the reload was ours, not the shopper's.
+                # Dismiss interruptions AFTER the state capture, never before --
+                # the modal must appear in the captured evidence, or a later
+                # nagging finding would cite a screenshot that doesn't show it.
                 if dismiss_interruptions:
-                    _dismiss_interruptions(page, second_state)
+                    dismissed = _dismiss_interruptions(page, state)
+                    if dismissed:
+                        trace.dismissed_modals.setdefault(step.name, []).extend(dismissed)
 
-        if guard.blocked:
+                if step.reload_for_urgency_check:
+                    time.sleep(reload_delay_seconds)
+                    page.reload()
+                    if step.wait_for_selector:
+                        page.wait_for_selector(step.wait_for_selector, timeout=5000)
+                    # The same wait as the first load: a fixed 300 ms captured an
+                    # empty shell on hydrated storefronts, and the reload
+                    # comparison then compared a page with nothing on it.
+                    wait_until_rendered(page)
+                    second_state = extract_page_state(page, step.name, adapter.price_selector_override)
+                    trace.reload_pairs[step.name] = (state, second_state)
+                    # A reload brings the pop-up back. Close it again so it does
+                    # not cover the next step's controls. Not recorded as a
+                    # dismissal: the reload was ours, not the shopper's.
+                    if dismiss_interruptions:
+                        _dismiss_interruptions(page, second_state)
 
-            trace.blocked_requests = list(guard.blocked)
+            if guard.blocked:
 
-        browser.close()
+                trace.blocked_requests = list(guard.blocked)
+
+        finally:
+            browser.close()
 
     return trace
 

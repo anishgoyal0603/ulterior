@@ -124,15 +124,15 @@ def test_interference_tiers_need_two_signals_and_a_nearby_pair():
     from detectors.layer2_visual import detect_interface_interference
     accept = _btn("Yes, add it", "accept", {"x": 0, "y": 0, "width": 300, "height": 60}, 12.0, 20)
     faint = _btn("No thanks", "decline", {"x": 0, "y": 80, "width": 60, "height": 20}, 1.8, 12)
-    v = detect_interface_interference(FunnelTrace("s", states=[_state("p", buttons=[accept, faint])]))
+    v = detect_interface_interference(FunnelTrace("s", states=[_state("p", "Protect your phone for ₹199", buttons=[accept, faint])]))
     assert len(v) == 1 and v[0].evidence["evidence_tier"] == "corroborated"
     only_faint = _btn("No thanks", "decline", {"x": 0, "y": 80, "width": 280, "height": 60}, 2.5, 20)
-    v = detect_interface_interference(FunnelTrace("s", states=[_state("p", buttons=[accept, only_faint])]))
+    v = detect_interface_interference(FunnelTrace("s", states=[_state("p", "Protect your phone for ₹199", buttons=[accept, only_faint])]))
     assert len(v) == 1 and v[0].evidence["evidence_tier"] == "indicative"
     # A banner "Close" far away is not paired with the checkout button, and
     # does not hide a real suppressed decline further down.
     banner = _btn("No thanks", "decline", {"x": 1000, "y": 2000, "width": 40, "height": 20}, 12.0, 12)
-    v = detect_interface_interference(FunnelTrace("s", states=[_state("p", buttons=[banner, accept, faint])]))
+    v = detect_interface_interference(FunnelTrace("s", states=[_state("p", "Protect your phone for ₹199", buttons=[banner, accept, faint])]))
     assert len(v) == 1 and v[0].evidence["decline_text"] == "No thanks"
 
 
@@ -301,8 +301,10 @@ def test_model_json_with_braces_in_the_prose_still_parses():
 
 
 def test_accepting_a_discount_is_not_confirmshaming():
-    src = (ROOT / "detectors" / "layer3_language.py").read_text(encoding="utf-8")
-    assert "d like \\\\d+% off" not in src and "'?d like" not in src
+    from detectors.layer3_language import _offline_confirm_shaming
+    assert _offline_confirm_shaming(["Yes, I'd like 10% off"]) == []
+    # ...but the sarcastic zero is (a real Mathur et al. 2019 example).
+    assert _offline_confirm_shaming(["No thanks, I'd like 0% off"])
 
 
 # ------------------------------------------------------------ 17. jobs

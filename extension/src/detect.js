@@ -172,8 +172,12 @@
       // Judge an amount by its own words and the label just before it
       // ("M.R.P.: ₹2,499", "You save ₹1,200") -- not by the whole line, which
       // on a real product page holds the price AND the MRP AND the saving.
-      const prev = a.el.previousSibling;
-      const before = prev ? C.normalizeQuotes(prev.textContent || "").trim().slice(-30) : "";
+      // The text just before it: the previous text node AND the previous
+      // element. previousSibling alone is usually the whitespace between
+      // "<span>EMI from</span> <strong>₹105</strong>", which hid the label.
+      const prevText = a.el.previousSibling ? (a.el.previousSibling.textContent || "") : "";
+      const prevEl = a.el.previousElementSibling ? (a.el.previousElementSibling.textContent || "") : "";
+      const before = C.normalizeQuotes(prevEl + " " + prevText).trim().slice(-30);
       if (NOT_A_PRICE_CONTEXT.test(a.text) || NOT_A_PRICE_CONTEXT.test(before)) continue;
       if (!best || a.fontSize > best.fontSize + 0.5) best = a;
     }
@@ -200,19 +204,26 @@
 
   /** The amount that belongs to a label: the label's own text, or the row it
    *  sits in -- the last amount in the row that is not struck through. */
+  // A condition inside a fee label is not the fee: "Delivery fee (Free above
+  // ₹499)" next to "FREE", or "Small cart fee (orders under ₹199)" next to
+  // "₹20". Reading the label first returned 499 and 199.
+  const THRESHOLD_CLAUSE_RE = /(\(|\b)(free\s+)?(above|over|under|below|upto|up\s*to|min(imum)?|orders?|on\s+orders?|less\s+than|more\s+than|till|until)\b[^)\n]{0,30}?(₹|rs\.?|inr)\s*[\d,]+(\.\d+)?\)?/gi;
+
   function amountForLabel(labelEl) {
-    const own = C.parseAmounts(textOf(labelEl));
+    // The label's own amount ("Total ₹457"), unless it is only a condition.
+    const own = C.parseAmounts(textOf(labelEl).replace(THRESHOLD_CLAUSE_RE, " "));
     if (own.length) return own[own.length - 1].value;
     let row = labelEl.parentElement;
     for (let i = 0; row && i < 3; i++, row = row.parentElement) {
       const t = textOf(row);
       if (t.length > 200) break;
+      const free = /\b(free|waived)\b/i.test(t.replace(THRESHOLD_CLAUSE_RE, " "));
       const nodes = amountNodes(row, 20).filter((a) => !a.struck && !labelEl.contains(a.el));
       if (nodes.length) {
-        if (/\b(free|waived)\b/i.test(t) && nodes.every((a) => a.value <= 0)) return 0;
+        if (free && nodes.every((a) => a.value <= 0)) return 0;
         return nodes[nodes.length - 1].value;
       }
-      if (/\b(free|waived)\b/i.test(t)) return 0;
+      if (free) return 0;
     }
     return null;
   }
@@ -243,7 +254,7 @@
         const v = amountForLabel(el);
         if (v === null || v <= 0) continue;
         if (!best || priority < best.priority || (priority === best.priority && v > best.value)) {
-          best = { value: v, label: C.clip(text, 40), priority };
+          best = { value: v, label: C.clip(text, 40), priority, el };
         }
       }
     });
@@ -302,18 +313,40 @@
     });
   }
 
-  function quantities() {
-    const body = textOf(document.body).slice(0, 20000);
+  /** How many people / items this order is for.
+   *
+   *  Read from the order summary (the block around the total), not the whole
+   *  page, and never from scarcity, promotion or capacity wording. "Only 3
+   *  seats left" on a 1-adult flight made the expected price 3 x the fare,
+   *  so a ₹549 drip "matched", and "Buy 3, get 10% off" on a 1-item cart
+   *  switched the drip comparison off. */
+  function quantities(total) {
+    let scope = document.body;
+    if (total && total.el) {
+      let el = total.el;
+      for (let i = 0; el && el !== document.body && i < 6; i++, el = el.parentElement) {
+        scope = el;
+        if (fast(el).length >= 400) break;
+      }
+    }
+    const body = textOf(scope).slice(0, 20000);
+    const NOT_BEFORE = /\b(only|just|up\s*to|upto|max(imum)?|min(imum)?|buy|for|over|under|above|below|at\s*least|any|get|of)\s*$/i;
+    const NOT_AFTER = /^\s*(\+|or\s+more|left|remaining|available|in\s+stock|max|maximum)/i;
+    const isCount = (m, re) => {
+      const before = body.slice(Math.max(0, m.index - 16), m.index);
+      const after = body.slice(m.index + m[0].length, m.index + m[0].length + 20);
+      return !NOT_BEFORE.test(before) && !NOT_AFTER.test(after);
+    };
     let persons = 0, items = 0, m;
     C.QTY_RE.lastIndex = 0;
     while ((m = C.QTY_RE.exec(body)) !== null) {
       const n = +m[1];
-      if (n > 0 && n <= 9) persons = Math.max(persons, n);
+      if (n > 0 && n <= 9 && isCount(m)) persons = Math.max(persons, n);
     }
     C.ITEM_COUNT_RE.lastIndex = 0;
     while ((m = C.ITEM_COUNT_RE.exec(body)) !== null) {
       const n = +(m[1] || m[2] || m[3]);
-      if (n > 0 && n <= 20) items = Math.max(items, n);
+      if (n > 0 && n <= 20 && isCount(m)) items = Math.max(items, n);
     }
     return { persons, items };
   }
@@ -442,11 +475,11 @@
     document.querySelectorAll(CLICKABLE + ", label").forEach((el) => {
       if (el.tagName !== "INPUT") {
         const f = C.normalizeQuotes(fast(el));
-        if (f.length < 8 || f.length > 320 || !C.GUILT_PATTERNS.some((p) => p.test(f))) return;
+        if (f.length < 8 || f.length > 320 || !C.isShaming(f)) return;
       }
       const t = clickableText(el);
       if (t.length < 8 || t.length > 160 || seen.has(t)) return;
-      if (!C.GUILT_PATTERNS.some((p) => p.test(t)) || !isVisible(el)) return;
+      if (!C.isShaming(t) || !isVisible(el)) return;
       seen.add(t);
       findings.push({
         code: "DP-03", tier: "indicative",
@@ -473,6 +506,8 @@
     return bg;
   }
 
+  const CLOSE_CONTROL_RE = /^([x×✕✖✗]|close|dismiss)$/i;
+
   function interferenceFindings() {
     const findings = [];
     const seen = new Set();
@@ -484,13 +519,20 @@
       // used to step to the parent once more after finding it, so the offer
       // text was read one level too high (or from nothing near <body>).
       let container = decline.parentElement, accept = null;
+      // The accept option is the LARGEST other call to action in the box,
+      // never a close icon: in "× ... Yes, protect ... no thanks" the first
+      // clickable in DOM order is the ×, which made the size comparison
+      // meaningless and printed "×" as the accept option.
       for (let i = 0; container && i < 5; i++) {
+        let bestArea = 0;
         for (const cand of container.querySelectorAll(CLICKABLE)) {
           if (cand === decline || cand.contains(decline) || decline.contains(cand)) continue;
           const at = clickableText(cand);
           if (!at || at.length > 60 || C.DECLINE_RE.test(at) || !isVisible(cand)) continue;
-          accept = cand;
-          break;
+          if (CLOSE_CONTROL_RE.test(at.trim()) || /\b(close|dismiss)\b/i.test(cand.getAttribute("aria-label") || "")) continue;
+          const r = cand.getBoundingClientRect();
+          const area = r.width * r.height;
+          if (!accept || area > bestArea) { accept = cand; bestArea = area; }
         }
         if (accept) break;
         container = container.parentElement;

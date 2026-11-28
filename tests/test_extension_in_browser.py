@@ -165,6 +165,9 @@ def test_drip_pricing_is_caught_across_a_flight_booking(ctx, fresh, site):
     drip = next(f for f in r["findings"] if f["code"] == "DP-08")
     assert "₹4,599" in drip["title"] and "₹5,148" in drip["title"], drip
     assert "Convenience fee ₹350" in drip["detail"], drip
+    # "Only 3 seats left" / "up to 9 passengers" are not the passenger
+    # count, and a "free above ₹9,999" condition is not a fee.
+    assert "9,999" not in drip["detail"] and "for 3" not in drip["title"], drip
     assert drip["tier"] == "corroborated"
     # The insurance was picked for the shopper, and saying no is a guilt trip.
     assert "DP-02" in codes(r) and "DP-03" in codes(r), codes(r)
@@ -268,6 +271,8 @@ def test_a_barely_visible_no_thanks_is_caught(ctx, fresh, site):
     f = next(f for f in r["findings"] if f["code"] == "DP-06")
     assert "no thanks" in f["detail"]
     assert float(f["evidence"]["decline_contrast"].split(":")[0]) < 3.0
+    # Compared with the real call to action, not the modal's × close icon.
+    assert f["evidence"]["accept_option"] == "Yes, protect my phone", f
 
 
 # ---------------------------------------------------------- price history

@@ -242,138 +242,142 @@ def walk_discovered_funnel(start_url: str, screenshot_dir: str = DEFAULT_EVIDENC
 
     with playwright_session() as p:
         browser = launch_browser(p, headless=headless)
-        # Discovery clicks links it found on the page, so the URLs it visits
-        # were never seen by the pre-flight check. A page can offer
-        # <a href="http://10.0.0.5:5432/">Proceed to checkout</a>, which
-        # matches the checkout intent and is not on the never-click list.
-        page, guard = new_guarded_page(browser, allow_file=start_url.startswith("file://"))
+        # Closed on EVERY path: a goto, click or screenshot that throws
+        # used to skip the close at the end.
+        try:
+            # Discovery clicks links it found on the page, so the URLs it visits
+            # were never seen by the pre-flight check. A page can offer
+            # <a href="http://10.0.0.5:5432/">Proceed to checkout</a>, which
+            # matches the checkout intent and is not on the never-click list.
+            page, guard = new_guarded_page(browser, allow_file=start_url.startswith("file://"))
 
-        def capture(step_name: str, reload_check: bool = False):
-            state = extract_page_state(page, step_name)
-            trace.states.append(state)
-            trace.step_roles[step_name] = None
-            safe = re.sub(r"[^A-Za-z0-9._-]", "_", step_name)[:40]
-            shot = os.path.join(screenshot_dir, f"discovered_{safe}.png")
-            try:
-                page.screenshot(path=shot, full_page=True)
-                trace.screenshots[step_name] = shot
-            except Exception:
-                pass
-
-            nonlocal refused_controls
-            refused_controls += _note_forbidden_controls(page, log)
-
-            dismissed = _dismiss_interruptions(page, state)
-            if dismissed:
-                trace.dismissed_modals.setdefault(step_name, []).extend(dismissed)
-
-            # The urgency check needs the same page loaded twice with real time
-            # in between. Only worth doing where scarcity claims actually live.
-            if reload_check:
-                time.sleep(reload_delay_seconds)
+            def capture(step_name: str, reload_check: bool = False):
+                state = extract_page_state(page, step_name)
+                trace.states.append(state)
+                trace.step_roles[step_name] = None
+                safe = re.sub(r"[^A-Za-z0-9._-]", "_", step_name)[:40]
+                shot = os.path.join(screenshot_dir, f"discovered_{safe}.png")
                 try:
-                    page.reload()
-                    wait_until_rendered(page)
-                    second = extract_page_state(page, step_name)
-                    trace.reload_pairs[step_name] = (state, second)
-                    # The reload re-opens any pop-up that was just closed, and
-                    # it would sit over the control the next step must click.
-                    _dismiss_interruptions(page, second)
+                    page.screenshot(path=shot, full_page=True)
+                    trace.screenshots[step_name] = shot
                 except Exception:
                     pass
-            return state
 
-        try:
-            page.goto(start_url, timeout=30000)
-            # A React storefront serves an empty shell and fills it in after
-            # hydration. Capturing 600ms in records a page with no price and
-            # no buttons, and the audit then reports "no findings" -- a clean
-            # bill of health for a site the crawler never actually saw.
-            wait_until_rendered(page)
-        except Exception as exc:
-            log.notes.append(f"Could not load the starting URL: {type(exc).__name__}")
-            trace.discovery = log.as_dict()
-            browser.close()
-            return trace
+                nonlocal refused_controls
+                refused_controls += _note_forbidden_controls(page, log)
 
-        capture("entry", reload_check=True)
-        log.reached.append("entry")
+                dismissed = _dismiss_interruptions(page, state)
+                if dismissed:
+                    trace.dismissed_modals.setdefault(step_name, []).extend(dismissed)
 
-        refused_next = []     # forbidden controls that matched a step we needed
-        for stage_name, intents in STAGES + [FINAL_STAGE]:
-            if should_stop is not None and should_stop():
-                trace.cancelled = True
-                log.notes.append("Stopped on request before the walk finished.")
-                break
-            found = _find_control(page, intents, log, refused_next)
-            if not found:
-                log.skipped.append(stage_name)
-                continue
-            element, label = found
-            url_before = page.url
-            try:
-                _same_tab(element)
-                element.click(timeout=8000)
-                wait_until_rendered(page)
-            except Exception as exc:
-                log.notes.append(
-                    f"Found '{label}' for the {stage_name} step but the click "
-                    f"failed ({type(exc).__name__})."
-                )
-                log.skipped.append(stage_name)
-                continue
-
-            log.notes.append(f"Clicked '{label}' to reach {stage_name}.")
-            # "Add to Cart" usually leaves the shopper on the product page or
-            # opens a drawer. Go on to the cart page itself when the page
-            # offers one, so the cart is not skipped on the way to checkout.
-            if stage_name == "cart" and page.url == url_before:
-                more = _find_control(page, VIEW_CART_INTENTS, log)
-                if more:
+                # The urgency check needs the same page loaded twice with real time
+                # in between. Only worth doing where scarcity claims actually live.
+                if reload_check:
+                    time.sleep(reload_delay_seconds)
                     try:
-                        _same_tab(more[0])
-                        more[0].click(timeout=8000)
+                        page.reload()
                         wait_until_rendered(page)
-                        log.notes.append(f"Clicked '{more[1]}' to open the cart page.")
+                        second = extract_page_state(page, step_name)
+                        trace.reload_pairs[step_name] = (state, second)
+                        # The reload re-opens any pop-up that was just closed, and
+                        # it would sit over the control the next step must click.
+                        _dismiss_interruptions(page, second)
                     except Exception:
                         pass
-            capture(stage_name, reload_check=(stage_name == "product"))
-            log.reached.append(stage_name)
+                return state
 
-        if looks_empty(page):
-            log.notes.append(
-                "The page rendered almost no text. On a modern storefront this "
-                "usually means the content is drawn by JavaScript that had not "
-                "finished, or a challenge page was served instead. Treat the "
-                "findings below as covering an empty page, not a clean one."
-            )
+            try:
+                page.goto(start_url, timeout=30000)
+                # A React storefront serves an empty shell and fills it in after
+                # hydration. Capturing 600ms in records a page with no price and
+                # no buttons, and the audit then reports "no findings" -- a clean
+                # bill of health for a site the crawler never actually saw.
+                wait_until_rendered(page)
+            except Exception as exc:
+                log.notes.append(f"Could not load the starting URL: {type(exc).__name__}")
+                trace.discovery = log.as_dict()
+                browser.close()
+                return trace
 
-        if len(trace.states) == 1:
-            if refused_next:
-                # Do not diagnose bot protection on a page that was obviously a
-                # real checkout -- the walk ended because it was supposed to.
-                #
-                # The reason is spelled out per control rather than asserted:
-                # this said "the next control commits a purchase" on
-                # saucedemo.com, where the refused control was a LOGIN button.
-                # Refusing to sign in and refusing to pay are both correct and
-                # they are not the same fact, and a report that states the
-                # wrong one is wrong even when the behaviour was right.
+            capture("entry", reload_check=True)
+            log.reached.append("entry")
+
+            refused_next = []     # forbidden controls that matched a step we needed
+            for stage_name, intents in STAGES + [FINAL_STAGE]:
+                if should_stop is not None and should_stop():
+                    trace.cancelled = True
+                    log.notes.append("Stopped on request before the walk finished.")
+                    break
+                found = _find_control(page, intents, log, refused_next)
+                if not found:
+                    log.skipped.append(stage_name)
+                    continue
+                element, label = found
+                url_before = page.url
+                try:
+                    _same_tab(element)
+                    element.click(timeout=8000)
+                    wait_until_rendered(page)
+                except Exception as exc:
+                    log.notes.append(
+                        f"Found '{label}' for the {stage_name} step but the click "
+                        f"failed ({type(exc).__name__})."
+                    )
+                    log.skipped.append(stage_name)
+                    continue
+
+                log.notes.append(f"Clicked '{label}' to reach {stage_name}.")
+                # "Add to Cart" usually leaves the shopper on the product page or
+                # opens a drawer. Go on to the cart page itself when the page
+                # offers one, so the cart is not skipped on the way to checkout.
+                if stage_name == "cart" and page.url == url_before:
+                    more = _find_control(page, VIEW_CART_INTENTS, log)
+                    if more:
+                        try:
+                            _same_tab(more[0])
+                            more[0].click(timeout=8000)
+                            wait_until_rendered(page)
+                            log.notes.append(f"Clicked '{more[1]}' to open the cart page.")
+                        except Exception:
+                            pass
+                capture(stage_name, reload_check=(stage_name == "product"))
+                log.reached.append(stage_name)
+
+            if looks_empty(page):
                 log.notes.append(
-                    "Only the starting page could be examined. The controls that "
-                    "would have gone further are on the never-click list -- each "
-                    "one is named above with the rule it matched. Findings below "
-                    "cover that one page only."
-                )
-            else:
-                log.notes.append(
-                    "Only the starting page could be examined. On a real shop this "
-                    "usually means bot protection served a challenge page, or the "
-                    "controls are rendered by JavaScript this crawler did not wait "
-                    "long enough for. Findings below cover that one page only."
+                    "The page rendered almost no text. On a modern storefront this "
+                    "usually means the content is drawn by JavaScript that had not "
+                    "finished, or a challenge page was served instead. Treat the "
+                    "findings below as covering an empty page, not a clean one."
                 )
 
-        browser.close()
+            if len(trace.states) == 1:
+                if refused_next:
+                    # Do not diagnose bot protection on a page that was obviously a
+                    # real checkout -- the walk ended because it was supposed to.
+                    #
+                    # The reason is spelled out per control rather than asserted:
+                    # this said "the next control commits a purchase" on
+                    # saucedemo.com, where the refused control was a LOGIN button.
+                    # Refusing to sign in and refusing to pay are both correct and
+                    # they are not the same fact, and a report that states the
+                    # wrong one is wrong even when the behaviour was right.
+                    log.notes.append(
+                        "Only the starting page could be examined. The controls that "
+                        "would have gone further are on the never-click list -- each "
+                        "one is named above with the rule it matched. Findings below "
+                        "cover that one page only."
+                    )
+                else:
+                    log.notes.append(
+                        "Only the starting page could be examined. On a real shop this "
+                        "usually means bot protection served a challenge page, or the "
+                        "controls are rendered by JavaScript this crawler did not wait "
+                        "long enough for. Findings below cover that one page only."
+                    )
+
+        finally:
+            browser.close()
 
     for note in guard.blocked:
         if note not in log.notes:

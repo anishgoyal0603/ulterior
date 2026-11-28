@@ -26,7 +26,7 @@ from .middleware import (
     RateLimitMiddleware,
 )
 from .auth import require_api_key, require_admin_key, require_caller, Caller, can_see
-from .retention import purge_expired, delete_job_evidence
+from .retention import purge_expired, delete_job_evidence, evidence_of, remove_evidence
 from .privacy import redact
 
 logger = logging.getLogger(__name__)
@@ -495,12 +495,13 @@ def delete_audit(job_id: int = PathParam(..., ge=1, lt=2**63, description="Audit
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    _delete_evidence_files(job)
+    evidence = evidence_of(job)
     # ORM cascade (see models.AuditJob.violations) removes the child
     # violation rows as part of this delete -- do not bulk-delete them
     # separately first, or the session's loaded children go stale.
     db.delete(job)
     db.commit()
+    remove_evidence(evidence)        # only once the rows are really gone
     return None
 
 
@@ -511,12 +512,15 @@ def purge_all_audits(db: Session = Depends(get_db),
     jobs = db.query(models.AuditJob).all()
     jobs_deleted = 0
     violations_deleted = 0
+    doomed = []
     for job in jobs:
-        _delete_evidence_files(job)
+        doomed.append(evidence_of(job))
         violations_deleted += len(job.violations)
         db.delete(job)   # cascade removes children
         jobs_deleted += 1
     db.commit()
+    for evidence in doomed:
+        remove_evidence(evidence)
     return {"jobs_deleted": jobs_deleted, "violations_deleted": violations_deleted}
 
 
@@ -662,9 +666,14 @@ def price_drops(payload: schemas.PriceDropsIn, db: Session = Depends(get_db)):
     # least two reports on its first and on its latest day.
     ends = {}
     for k, per_day in days_of.items():
-        first, last = min(per_day), max(per_day)
-        if first != last and per_day[first] >= 2 and per_day[last] >= 2:
-            ends[k] = (first, last, sum(per_day.values()))
+        # Only days with at least two reports count as a day's price. One
+        # stray report on the first day used to disqualify a product with
+        # dozens of reports on later days.
+        solid = {d: n for d, n in per_day.items() if n >= 2}
+        if len(solid) < 2:
+            continue
+        first, last = min(solid), max(solid)
+        ends[k] = (first, last, sum(solid.values()))
     # Step 2: prices for just those two days of just those products.
     wanted: dict = {}
     for k, (first, last, _) in ends.items():

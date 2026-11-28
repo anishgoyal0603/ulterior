@@ -37,4 +37,12 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
 # downgrading a visitor to http on their way to the page. The container is
 # only reachable through that proxy (there is no public TCP port), so the
 # header cannot come from anyone else.
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips="*"
+#
+# ...but ONLY when TRUST_PROXY_HEADERS=true. With "--forwarded-allow-ips=*"
+# uvicorn replaces the client address with the LEFTMOST X-Forwarded-For entry,
+# which the client writes itself; with TRUST_PROXY_HEADERS=false the rate
+# limiter then keyed on a spoofable value. Off, the real peer address is kept.
+# (FORWARDED_ALLOW_IPS is uvicorn's own setting, read from the environment.)
+CMD if [ "$TRUST_PROXY_HEADERS" = "true" ]; then export FORWARDED_ALLOW_IPS='*'; PROXY=--proxy-headers; \
+    else PROXY=--no-proxy-headers; fi; \
+    exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} $PROXY

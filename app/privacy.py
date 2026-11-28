@@ -35,8 +35,12 @@ _PATTERNS = [
     # Email addresses
     (re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"), "[EMAIL_REDACTED]"),
 
-    # Payment card numbers: 13-19 digits, optionally separated by spaces/hyphens.
-    (re.compile(r"\b(?:\d[ -]*?){13,19}\b"), "[CARD_REDACTED]"),
+    # Payment card numbers, in the shapes cards are actually written: 13-19
+    # digits together, 4-4-4-4(-3) or Amex 4-6-5, one consistent separator.
+    # "Any 13-19 digits with any separators" also matched timestamps
+    # ("2026-11-28 15-08-30") and lists of prices.
+    (re.compile(r"\b(?:\d{13,19}|\d{4}([ -])\d{4}\1\d{4}\1\d{1,7}|\d{4}([ -])\d{6}\2\d{4,5})\b"),
+     "[CARD_REDACTED]"),
 
     # Aadhaar: 12 digits, commonly written in 4-4-4 groups.
     (re.compile(r"\b\d{4}[ -]?\d{4}[ -]?\d{4}\b"), "[ID_REDACTED]"),

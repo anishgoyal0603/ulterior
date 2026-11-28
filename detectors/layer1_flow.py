@@ -22,7 +22,7 @@ import re
 from typing import List, Optional
 
 from .taxonomy import BY_CODE, PROVABLE, CORROBORATED, INDICATIVE, clamp_confidence
-from .vocab import RECURRING_BILLING_TERMS, matches_any as _matches_any, is_recurring_label  # noqa: F401
+from .vocab import RECURRING_BILLING_TERMS, BENEFIT_RE, matches_any as _matches_any, is_recurring_label  # noqa: F401
 from .layer1_rules import Violation
 from capture.funnel_walker import FunnelTrace
 from capture.state_extractor import PageState, parse_money
@@ -55,7 +55,7 @@ UNRELATED_CONSENT_TERMS = [
     r"\bsms\b.*\boffers?\b", r"\bwhatsapp\b.*\b(offers?|updates?)\b",
     # Either order: "offers on WhatsApp" is as common as "WhatsApp offers".
     r"\b(offers?|deals?|updates?)\b.*\b(whatsapp|sms)\b", r"\breceive (exclusive |special )?(offers?|deals?)\b",
-    r"\bpersonalised? ads?\b", r"\btargeted ads?\b",
+    r"\bpersonalised? ads?\b", r"\btargeted ads?\b", r"\badvertis(ing|ers?)\b",
 ]
 
 # Wording that makes a consent LAWFUL AND TRANSACTION-RELATED even though it
@@ -81,6 +81,9 @@ LAWFUL_CONSENT_CONTEXT = [
 # lawful. Only the softer terms ("third parties", "partners") can be
 # legitimate disclosures, so only those may be excused by the lawful context.
 MARKETING_CONSENT_TERMS = [
+    # Selling the shopper's data is never what a Terms box makes lawful.
+    r"\bshare (my|your) (data|details|information|personal)\b.*\b(advertis\w*|partners?|third[\s-]?part(y|ies)|affiliates?)\b",
+    r"\badvertis(ing|ers?)\b", r"\baffiliates?\b.*\b(offers?|marketing|promot\w*|advertis\w*)\b",
     r"\bmarketing\b", r"\bpromotions?\b", r"\bpromotional\b", r"\bnewsletter\b",
     r"\boffers? and updates?\b", r"\bsms\b.*\boffers?\b", r"\bwhatsapp\b.*\b(offers?|updates?)\b",
     r"\b(offers?|deals?|updates?)\b.*\b(whatsapp|sms)\b", r"\breceive (exclusive |special )?(offers?|deals?)\b",
@@ -317,7 +320,10 @@ def detect_subscription_trap(trace: FunnelTrace) -> List[Violation]:
     # (b) path asymmetry
     signup_steps = [n for n, role in trace.step_roles.items() if role == "signup"]
     cancel_steps = [n for n, role in trace.step_roles.items() if role == "cancel"]
-    if signup_steps and cancel_steps and len(cancel_steps) > len(signup_steps):
+    # One extra step is a confirmation ("Are you sure?"), which a lawful
+    # cancel flow is allowed to have: Account -> Cancel -> Confirm against a
+    # one-step signup is not a trap. Two or more extra steps is the asymmetry.
+    if signup_steps and cancel_steps and len(cancel_steps) - len(signup_steps) >= 2:
         ratio = len(cancel_steps) / len(signup_steps)
         violations.append(Violation(
             pattern_code="DP-05", pattern_name=BY_CODE["DP-05"].name,
@@ -419,9 +425,25 @@ COMMITMENT_CTA = [
 # started" on a sign-up form). They only count as a paid commitment when the
 # page itself talks about a plan, membership, trial or recurring price.
 _WEAK_COMMITMENT_CTA = [r"\bget started\b", r"\bjoin now\b", r"\bupgrade\b"]
+# A paid plan's words. Not bare "plan" or "premium": "Protection Plan" and
+# "Premium Phone Case" are products, and turned "Upgrade" / "Join now" into a
+# subscription offer.
 _PLAN_CONTEXT = re.compile(
-    r"\b(subscription|membership|member|plan|trial|premium|renews?|auto[\s-]?renew|billed|per month|/\s*mo(nth)?)\b",
+    r"\b(subscription|membership|(monthly|annual|yearly|paid|pro|premium|basic|family|individual)\s+plan|"
+    r"premium\s+(membership|plan|subscription|tier)|free\s+trial|trial\s+(ends|period|then)|renews?|"
+    r"auto[\s-]?renew|billed|per\s+month|/\s*mo(nth)?)\b",
     re.IGNORECASE)
+
+
+def _text_near_button(state, button, chars: int = 400) -> str:
+    """The page text around this button's own words (its card), so a price
+    elsewhere on the page is not read as this button's offer."""
+    text = _without_emi_lines(state.full_text or "")
+    label = (button.text or "").strip()
+    i = text.find(label) if label else -1
+    if i < 0:
+        return text
+    return text[max(0, i - chars):i + len(label) + chars]
 
 
 _EMI_LINE = re.compile(r"\b(emi|emis|instal+ments?|pay later|no[\s-]cost)\b", re.IGNORECASE)
@@ -464,11 +486,18 @@ def _first_commitment_state(trace: FunnelTrace):
             # EMI lines ("EMI from ₹105/month") are a way to pay for one
             # purchase; they must not make "Join now" look like a paid plan.
             text = _without_emi_lines(state.full_text or "")
-            if _RECURRING_PRICE_RE.search(text):
+            weak = bool(_matches_any(button.text, _WEAK_COMMITMENT_CTA))
+            # The recurring price must be near THIS button, not anywhere on
+            # the page: a newsletter "Subscribe" in the footer of a page whose
+            # banner says "₹99/month" was taken for a paid plan's CTA.
+            near = _text_near_button(state, button)
+            if _RECURRING_PRICE_RE.search(near):
                 return state, index
-            if _matches_any(button.text, _WEAK_COMMITMENT_CTA) and not _PLAN_CONTEXT.search(text):
+            if _matches_any(near, NON_COMMITMENT_SUBSCRIBE):
                 continue
-            if _matches_any(text, NON_COMMITMENT_SUBSCRIBE):
+            if weak and not _PLAN_CONTEXT.search(text):
+                continue
+            if _matches_any(text, NON_COMMITMENT_SUBSCRIBE) and not _RECURRING_PRICE_RE.search(text):
                 continue
             return state, index
     return None, -1
@@ -558,6 +587,11 @@ def detect_nagging(trace: FunnelTrace) -> List[Violation]:
 
 # --- DP-12 SaaS Billing ---------------------------------------------------
 
+_PAID_PLAN_RE = re.compile(
+    r"\b(pro|plus|premium|tier|plan|membership|member|charged|billed|renews?|auto[\s-]?renew(al|s|ing)?|"
+    r"subscription)\b", re.IGNORECASE)
+
+
 def _is_billing_cycle_choice(control, controls) -> bool:
     """A radio whose every alternative is ALSO a paid recurring plan
     ("Monthly ₹199/month" vs "Annual ₹1,999/year"). The shopper has already
@@ -598,8 +632,19 @@ def detect_saas_billing(trace: FunnelTrace) -> List[Violation]:
             matched = _matches_any(control.label_text, RECURRING_BILLING_TERMS)
             if not matched or not is_recurring_label(control.label_text):
                 continue          # no billing words, or an EMI/instalment option
+            amount = parse_money(control.label_text) or 0
             if parse_money(control.label_text) == 0:
                 continue          # a ₹0 / free tier costs nothing, recurring or not
+            if amount <= 0:
+                # No price on the label: it is a paid plan only if it says so
+                # ("Auto-renew my Pro membership"). "Subscribe to our monthly
+                # newsletter" and "Send me monthly order updates" are free
+                # email preferences, and were reported here at PROVABLE 1.0.
+                if (_matches_any(control.label_text, NON_COMMITMENT_SUBSCRIBE)
+                        or BENEFIT_RE.search(control.label_text)
+                        or not _PAID_PLAN_RE.search(control.label_text)
+                        or re.search(r"\bfree\b", control.label_text, re.IGNORECASE)):
+                    continue
             if _is_billing_cycle_choice(control, state.checkboxes):
                 continue
             identity = (control.id, control.label_text)

@@ -23,9 +23,9 @@
   const state = {
     firstChecked: new WeakMap(),         // what each choice looked like when we first saw it
     touched: new WeakSet(),              // choices the person changed themselves
-    timers: new Map(),                   // live-countdown samples, by position on the page
+    timersSampledFor: null,              // the route whose countdowns have been sampled
     timerFindings: [],
-    path: location.pathname,             // the route the timer state belongs to
+    route: null,                         // the route the timer findings belong to
     settings: { overlay: true, history: true, priceCheck: true },
     hidden: false,
     lastResults: null,
@@ -65,28 +65,46 @@
    * before). A static "2h 15m" is a flight duration; a timer that resumes
    * where it left off is an honest deadline. Either way: no finding.
    */
+  // Path, query AND hash: query-routed products (?product_id=42) and
+  // hash-routed apps change only those.
+  const routeKey = () => location.pathname + location.search + location.hash;
+  let timerGeneration = 0, timerBusy = false;
+
   async function checkTimers() {
-    const path = location.pathname;
+    if (timerBusy) return;
+    const route = routeKey();
     const found = D.findCountdowns();
+    // Nothing yet: a single-page app may still be rendering this route. The
+    // next scan (triggered by the page changing) looks again.
     if (!found.length) return;
+    state.timersSampledFor = route;
+    timerBusy = true;
+    const gen = ++timerGeneration;
+    try { await sampleTimers(found, route, gen); } finally { timerBusy = false; }
+  }
+
+  async function sampleTimers(found, route, gen) {
+    // Samples are local to this run (not shared state), so a quick Back and
+    // forward cannot mix readings from two routes.
+    const samples = new Map();
     const t0 = Date.now();
     // Timers are matched by what they SAY around them, not by their position
     // in the page: if one timer appears or disappears in between, position
     // pairs two different timers.
     const idOf = (f) => (f.ctx || "").replace(/\d+/g, "#").replace(/\s+/g, " ").trim().slice(0, 60);
-    found.forEach((f) => state.timers.set(idOf(f), { first: f.sec, at: t0, ctx: f.ctx }));
+    found.forEach((f) => samples.set(idOf(f), { first: f.sec, at: t0, ctx: f.ctx }));
     await new Promise((r) => setTimeout(r, 3500));
-    if (location.pathname !== path) return;        // the shopper moved on: these readings are stale
+    if (routeKey() !== route || gen !== timerGeneration) return;   // moved on: stale readings
     const again = D.findCountdowns();
     const findings = [];
     for (const cur of again) {
       const id = idOf(cur);
-      const before = state.timers.get(id);
+      const before = samples.get(id);
       if (!before) continue;
       const elapsed = (Date.now() - before.at) / 1000;
       const dropped = before.first - cur.sec;
       if (dropped < 1 || dropped > elapsed + 2) continue;          // not a live countdown
-      const key = `timer:${SITE}${location.pathname}:${id}`;
+      const key = `timer:${SITE}${route}:${id}`.slice(0, 300);
       const prev = await P.Session.get(key);
       const now = Date.now();
       await P.Session.set(key, { sec: cur.sec, at: now });
@@ -110,7 +128,7 @@
         });
       }
     }
-    if (findings.length && location.pathname === path) {
+    if (findings.length && routeKey() === route && gen === timerGeneration) {
       state.timerFindings = findings;
       scan();
     }
@@ -121,11 +139,16 @@
    *  page they were taken on: on a new route they are dropped and the new
    *  page's timers are checked. */
   function onRouteChange() {
-    if (location.pathname === state.path) return;
-    state.path = location.pathname;
-    state.timers.clear();
-    state.timerFindings = [];
-    checkTimers();
+    const route = routeKey();
+    if (route !== state.route) {
+      state.route = route;
+      state.timerFindings = [];
+      state.timersSampledFor = null;
+      timerGeneration++;                 // any run for the old route is now stale
+    }
+    // Sample this route's countdowns once they exist; a countdown that mounts
+    // after the route changed is picked up by a later scan.
+    if (state.timersSampledFor !== route) checkTimers();
   }
 
   // ----------------------------------------------------------- nagging
@@ -199,7 +222,7 @@
       if (!isCheckout && buyCount >= 1 && buyCount <= 2 && !D.looksLikeCartOrCheckout()) product = D.prominentPrice();
       root.__ulteriorLastScan = {
         isCheckout, productPrice: product ? product.value : null,
-        productDisclosed: product && product.el ? /\b(fees?|charges?|excl)\b/i.test(D.textOf(product.el.parentElement || product.el)) : false,
+        productDisclosed: product && product.el ? C.disclosesCharges(D.textOf(product.el.parentElement || product.el)) : false,
       };
 
       findings.push(...D.preselectedFindings(state));
@@ -219,7 +242,7 @@
       let journey = null;
       if (isCheckout) {
         const addOns = findings.filter((f) => f.code === "DP-02").reduce((t, f) => t + (f.amountValue || 0), 0);
-        const j = await J.evaluate({ isCheckout, total, fees, addOns, quantities: D.quantities() });
+        const j = await J.evaluate({ isCheckout, total, fees, addOns, quantities: D.quantities(total) });
         findings.push(...j.findings);
         notes.push(...j.notes);
         journey = j.summary;
@@ -263,9 +286,15 @@
       state.lastResults = results;
       // Most rescans see the same page. Only tell the toolbar and redraw the
       // alert when something actually changed.
-      const signature = JSON.stringify([findings, notes, journey, history && history.count,
+      // Which page and which product are part of "what is on screen": on a
+      // single-page shop two products with no findings and one reading each
+      // gave the same signature, and the first product's price and watch box
+      // stayed up while the second was shown.
+      const signature = JSON.stringify([location.pathname + location.search + location.hash,
+                                        productTitle, findings, notes, journey, history && history.count,
                                         history && history.elsewhere, state.settings, state.hidden,
-                                        price && [price.verdict, price.target, price.community, price.series.length]]);
+                                        price && [price.key, price.current, price.verdict, price.target,
+                                                  price.community, price.series.length]]);
       if (signature !== lastSignature) {
         lastSignature = signature;
         P.send({ type: "RESULTS", results });

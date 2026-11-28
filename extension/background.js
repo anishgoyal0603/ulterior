@@ -176,13 +176,24 @@ async function communityHistory(key) {
   } catch (e) { return null; }
 }
 
+const communityInFlight = new Set();
 async function communityPut(key, price) {
   if (!(await communityOn())) return;
   const k = "cp:" + key;
+  if (communityInFlight.has(k)) return;
   const last = (await ext.storage.session.get(k))[k];
   if (last && last.price === price && Date.now() - last.at < 6 * 3600 * 1000) return;   // once per 6 h per price
-  await ext.storage.session.set({ [k]: { at: Date.now(), price } });
-  communityFetch(C.COMMUNITY_PATHS.put, { observations: [{ key, price }] }).catch(() => {});
+  communityInFlight.add(k);
+  try {
+    await communityFetch(C.COMMUNITY_PATHS.put, { observations: [{ key, price }] });
+    // Remembered only once the server has it: marking it sent BEFORE the
+    // request meant a cold start or a 502 lost the reading for six hours.
+    await ext.storage.session.set({ [k]: { at: Date.now(), price } });
+  } catch (e) {
+    /* not sent; the next visit tries again */
+  } finally {
+    communityInFlight.delete(k);
+  }
 }
 
 // --------------------------------------------------------- price alerts

@@ -95,6 +95,9 @@ lists what is no longer observed, still observed and new.
 - [ ] `PUBLIC_BASE_URL` = this deployment's public https address (production
       refuses to start with the 127.0.0.1 default while the demo is on).
 - [ ] `TRUST_PROXY_HEADERS=true` and `TRUSTED_PROXY_HOPS=1` behind Railway/nginx.
+      This is also what switches on uvicorn's proxy headers in the container
+      (https redirects); without a proxy in front, leave it `false`, so a
+      client cannot choose its own address with `X-Forwarded-For`.
 - [ ] Daily database backup, and one test restore done before the first customer.
 - [ ] Either `RUN_AUDIT_WORKERS=true` (one process does everything), or
       `RUN_AUDIT_WORKERS=false` on the API plus `python -m app.worker` running

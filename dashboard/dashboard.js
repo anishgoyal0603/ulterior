@@ -86,6 +86,16 @@ function setAuthState(state, detail) {
     ["kpi-audits", "kpi-violations", "kpi-top"].forEach((id) => {
       document.getElementById(id).textContent = "\u2014";
     });
+    // Everything the previous key could see goes too: on a shared browser,
+    // clearing the key or typing a wrong one left the last organisation's
+    // audits, findings, chart and reports on screen.
+    endAuditRun();
+    document.getElementById("jobs-table").replaceChildren();
+    renderPatternChart([]);
+    clearJobPanel();
+    document.getElementById("violations-title").textContent = "Connect with your API key to see audits";
+    document.getElementById("reports-table").replaceChildren();
+    document.getElementById("reports-card").hidden = true;
   }
 }
 
@@ -1004,6 +1014,9 @@ document.getElementById("target-urls").addEventListener("keydown", (e) => {
   if (e.key === "Enter") runUrlAudit();
 });
 function connect() {
+  // A new key is a new workspace: the old one's running poll must stop
+  // rather than keep asking about a job this key may not be able to see.
+  endAuditRun();
   document.querySelectorAll(".conn-error").forEach(el => el.remove());
   const status = document.getElementById("run-status");
   status.classList.remove("is-error");

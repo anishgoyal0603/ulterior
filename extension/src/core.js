@@ -179,6 +179,33 @@
 
   // Quantity words. Listing prices for tickets and fares are usually per
   // person, so "2 tickets" at ₹250 means ₹500 is the honest expectation.
+  // Kept in step with _is_shaming in detectors/layer3_language.py. "I don't
+  // want/need ..." and "without protection" are also how a NEUTRAL decline is
+  // written ("No, I don't need a warranty"); alone they count only when the
+  // line also puts a value or a self-judgement on saying no.
+  const SOFT_GUILT = [0, 4, 6];        // indexes into GUILT_PATTERNS
+  const STRONG_DONT_RE = /\bi don'?t (like|care about|mind|hate|despise)\b/i;
+  const VALUE_WORDS_RE = /\b(sav(e|ing|ings)|discounts?|deals?|offers?|money|free|benefits?|better|smart|win(ning|s)?|lucky|best|cheap|rather|kick|protect(ed|ing)?\s+(my|me|myself)|secure\s+my|safe(ty)?|exclusive|rewards?|full\s+price|pay\s+more|miss(ing)?\s+out|risk|luck|style|stylish|healthy|happy|fun|great|amazing|special|vip|perks?)\b/i;
+  function isShaming(text) {
+    const t = normalizeQuotes(text);
+    const hits = GUILT_PATTERNS.map((p, i) => (p.test(t) ? i : -1)).filter((i) => i >= 0);
+    if (!hits.length) return false;
+    if (STRONG_DONT_RE.test(t)) return true;
+    if (hits.every((i) => SOFT_GUILT.includes(i)) && !VALUE_WORDS_RE.test(t)) return false;
+    return true;
+  }
+
+  /** Does this text tell the shopper that charges come ON TOP of the price?
+   *  "Inclusive of all fees", "No hidden fees", "Zero delivery charges" and
+   *  "Delivery charges: FREE" say the opposite, and used to count as a
+   *  disclosure -- which switched DP-08 off for the checkout that then added
+   *  fees. Negated and inclusive mentions are removed before the test. */
+  const NEGATED_CHARGE_RE = /\b(no|zero|free|without|waived|nil|incl\.?|including|inclusive(\s+of)?|includes?)(\s+(all|any|hidden|extra|additional|delivery|shipping|convenience|platform|booking|service|handling|other))*\s+(fees?|charges?)\b|\b(fees?|charges?)\s*[:\-–]?\s*(free|nil|waived|₹\s*0(?![\d.,])|0(?![\d.,]))/gi;
+  const DISCLOSES_CHARGES_RE = /\b(fees?|charges?|excl\.?|exclusive\s+of|plus\s+taxes)\b|\+\s*(₹|rs\.?\s*\d)/i;
+  function disclosesCharges(text) {
+    return DISCLOSES_CHARGES_RE.test(String(text || "").replace(NEGATED_CHARGE_RE, " "));
+  }
+
   const QTY_RE = /(?:\b|^)(\d{1,2})\s*(tickets?|seats?|adults?|travell?ers?|passengers?|guests?|persons?|people|pax|टिकट|यात्री|व्यक्ति)/gi;
   const ITEM_COUNT_RE = /\b(\d{1,2})\s*items?\b|\bqty\s*[:.]?\s*(\d{1,2})\b|\bquantity\s*[:.]?\s*(\d{1,2})\b/gi;
 
@@ -213,7 +240,9 @@
   // ------------------------------------------------------------- privacy
   const PII_PATTERNS = [
     [/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[EMAIL]"],
-    [/\b(?:\d[ -]*?){13,19}\b/g, "[CARD]"],
+    // Card shapes only (kept in step with app/privacy.py): timestamps such
+    // as "2026-11-28 15-08-30" are not card numbers.
+    [/\b(?:\d{13,19}|\d{4}([ -])\d{4}\1\d{4}\1\d{1,7}|\d{4}([ -])\d{6}\2\d{4,5})\b/g, "[CARD]"],
     [/\b\d{4}[ -]?\d{4}[ -]?\d{4}\b/g, "[ID]"],
     // Not inside a longer code: "SKU9876543210" is not a phone number.
     [/(?:\+?91[\s-]?|(?<![A-Za-z0-9])0|(?<![A-Za-z0-9]))[6-9](?:[\s-]?\d){9}\b/g, "[PHONE]"],
@@ -685,7 +714,7 @@
     VERSION, SUPPORTED_SITES, parseAmounts, formatINR, FEE_LABEL_RE, TOTAL_LABELS, PAY_BUTTON_RE, BUY_VERB_RE,
     PAID_ADDON_RE, BENEFIT_RE, DECLINE_RE, URGENCY_PATTERNS, GUILT_PATTERNS,
     RECURRING_BILLING_PATTERNS, DOUBLE_NEGATIVE_PATTERNS, OPT_OUT_LABEL_PATTERNS,
-    QTY_RE, ITEM_COUNT_RE, redact, normalizeQuotes, clip, siteOf, productKey,
+    QTY_RE, ITEM_COUNT_RE, disclosesCharges, isShaming, redact, normalizeQuotes, clip, siteOf, productKey,
     parseColor, contrastRatio, over, parseCountdown, fmtClock, judgeJourney,
     PATTERN_NAMES, DISCLAIMER, HELPLINE, buildReport,
     CONSENT_TERMS_RE, CONSENT_MARKETING_RE, APP_WALL_RE, APP_WALL_BLOCK_RE, CONTINUE_ON_WEB_RE,

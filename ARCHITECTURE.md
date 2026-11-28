@@ -142,9 +142,10 @@ for reasons nobody could see. Now:
 - LLM-contributed findings carry `"source": "anthropic_api"` in their
   evidence, so a reader can discount them independently.
 
-When it does run, the only thing sent is the text of decline/opt-out controls
-— typically one or two short strings — passed through `redact()` first. Not
-the HTML, not the page text, not screenshots, not URLs, not prices.
+When it does run, the only things sent are the text of decline/opt-out
+controls and the labels of checkboxes and radio buttons (where trick wording
+lives) — a few short strings, each capped at 300 characters — passed through
+`redact()` first. Not the HTML, not the page text, not screenshots, not URLs.
 
 ---
 

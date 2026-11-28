@@ -32,6 +32,27 @@ def job_evidence_dir(job_id: int) -> str:
     return os.path.join(DEFAULT_EVIDENCE_DIR, f"job_{int(job_id)}")
 
 
+def evidence_of(job: AuditJob):
+    """Everything on disk that belongs to this audit, read BEFORE its rows are
+    deleted (the rows say where the screenshots are)."""
+    return ([v.screenshot_path for v in job.violations if v.screenshot_path], job_evidence_dir(job.id))
+
+
+def remove_evidence(evidence) -> None:
+    """Delete files gathered by evidence_of(). Call it only AFTER the database
+    commit succeeded: deleting first meant a failed commit left the audit
+    rows in place with their screenshots gone, and Verify evidence reported
+    "Incomplete" for ever."""
+    paths, folder = evidence
+    for path in paths:
+        try:
+            if os.path.isfile(path):
+                os.remove(path)
+        except OSError:
+            pass
+    shutil.rmtree(folder, ignore_errors=True)
+
+
 def delete_job_evidence(job: AuditJob) -> None:
     """Remove EVERY screenshot an audit took, not only the ones a finding
     points at. The walker saves a full-page PNG for every step into the job's
@@ -61,6 +82,7 @@ def purge_expired() -> int:
     Returns the number of audits removed."""
     db = SessionLocal()
     removed = 0
+    doomed = []          # evidence to delete once the commit has succeeded
     try:
         # 1. Age-based purge
         if config.RETENTION_DAYS > 0:
@@ -72,7 +94,7 @@ def purge_expired() -> int:
                                AuditJob.status.notin_(("pending", "running")))
                        .all())
             for job in expired:
-                delete_job_evidence(job)
+                doomed.append(evidence_of(job))
                 db.delete(job)   # cascade removes violations
                 removed += 1
             # SessionLocal has autoflush off: without this the count below
@@ -91,7 +113,7 @@ def purge_expired() -> int:
                 for job in (db.query(AuditJob)
                             .filter(demo, AuditJob.status.notin_(("pending", "running")))
                             .order_by(AuditJob.created_at.asc()).limit(extra_demo).all()):
-                    delete_job_evidence(job)
+                    doomed.append(evidence_of(job))
                     db.delete(job)
                     removed += 1
                 db.flush()
@@ -110,7 +132,7 @@ def purge_expired() -> int:
                     .all()
                 )
                 for job in oldest:
-                    delete_job_evidence(job)
+                    doomed.append(evidence_of(job))
                     db.delete(job)
                     removed += 1
 
@@ -151,6 +173,8 @@ def purge_expired() -> int:
         raise
     finally:
         db.close()
+    for evidence in doomed:
+        remove_evidence(evidence)
     return removed
 
 

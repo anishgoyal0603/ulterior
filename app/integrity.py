@@ -59,7 +59,12 @@ def findings_digest(findings: List[dict]) -> str:
             }
             for f in findings
         ),
-        key=lambda r: (str(r["code"]), str(r["step"]), r["explanation"]),
+        # Ties (same pattern, step and explanation) are broken by the whole
+        # canonical row: PostgreSQL returns rows in no fixed order, and two
+        # tied findings in a different order changed the digest, so
+        # "Verify evidence" flipped between Intact and Changed. Untied rows
+        # keep the order they always had, so existing manifests still match.
+        key=lambda r: (str(r["code"]), str(r["step"]), r["explanation"], _canonical(r)),
     )
     return sha256_bytes(_canonical(rows))
 
@@ -148,14 +153,19 @@ def compare_findings(baseline: List[dict], current: List[dict]) -> dict:
         return {"pattern_code": f.get("pattern_code"), "pattern_name": f.get("pattern_name"),
                 "step_name": f.get("step_name")}
 
-    base = {}
+    # Counted, not collapsed: two pre-ticked add-ons on one step are two
+    # findings. With one kept per key, fixing one of them showed "0 resolved"
+    # and adding a second showed "0 new".
+    base, cur = {}, {}
     for f in baseline:
-        base.setdefault(key(f), f)
-    cur = {}
+        base.setdefault(key(f), []).append(f)
     for f in current:
-        cur.setdefault(key(f), f)
-    return {
-        "resolved": [row(f) for k, f in base.items() if k not in cur],
-        "still_present": [row(f) for k, f in cur.items() if k in base],
-        "new": [row(f) for k, f in cur.items() if k not in base],
-    }
+        cur.setdefault(key(f), []).append(f)
+    resolved, still, new = [], [], []
+    for k in list(base) + [k for k in cur if k not in base]:
+        b, c = base.get(k, []), cur.get(k, [])
+        shared = min(len(b), len(c))
+        still += [row(f) for f in c[:shared]]
+        resolved += [row(f) for f in b[shared:]]
+        new += [row(f) for f in c[shared:]]
+    return {"resolved": resolved, "still_present": still, "new": new}

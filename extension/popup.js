@@ -108,7 +108,12 @@
     $("watch-form").hidden = !!pr.target;
     $("watching").hidden = !pr.target;
     if (pr.target) $("watching-text").textContent = `Watching - alert at ${C.formatINR(pr.target)} or less.`;
-    else if (!$("target").value) $("target").value = String(C.suggestTarget(pr.current));
+    // The typed target belongs to one product: on a single-page shop the
+    // next product starts from its own suggestion, not the last one's number.
+    else if (!$("target").value || $("target").dataset.key !== pr.key) {
+      $("target").value = String(C.suggestTarget(pr.current));
+      $("target").dataset.key = pr.key || "";
+    }
     $("price-source").textContent = pr.community
       ? `Includes community prices from ${pr.community} day${pr.community === 1 ? "" : "s"}.`
       : "Prices you have seen, kept on this device.";
@@ -167,10 +172,13 @@
         $("report-preview").hidden = true;
       } else {
         const next = JSON.stringify(C.buildReportPayload(results), null, 2);
-        if (next !== $("report-json").textContent) {
-          $("report-json").textContent = next;
+        // Only a change in WHAT would be reported counts; the capture time
+        // moves on every scan and is not news.
+        const withoutTime = (t) => String(t).replace(/"captured_at":\s*"[^"]*"/, "");
+        if (withoutTime(next) !== withoutTime($("report-json").textContent)) {
           $("report-status").textContent = "The page changed, so this preview was updated.";
         }
+        $("report-json").textContent = next;
       }
     }
     if (!results) {
